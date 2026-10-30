@@ -1,6 +1,8 @@
 package com.smartpdf.pairer.smart
 
 import android.content.Context
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -18,6 +20,13 @@ import javax.crypto.spec.GCMParameterSpec
 object AiAuditClient {
     data class Settings(val baseUrl: String, val model: String, val apiKey: String)
     data class Audit(val status: String, val confidence: Double, val correctedArabic: String, val explanation: String)
+    data class VisionFinding(
+        val sourceText: String,
+        val targetText: String,
+        val issue: String,
+        val suggestedArabic: String,
+        val confidence: Double
+    )
 
     private const val PREFS = "smartpdf_ai_audit"
     private const val KEY_ALIAS = "smartpdf_ai_audit_key_v1"
@@ -95,6 +104,89 @@ CURRENT ARABIC TRANSLATION:\n$targetArabic
             throw IllegalStateException("تعذر فحص جودة الترجمة بالذكاء الاصطناعي: ${e.message ?: e.javaClass.simpleName}", e)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    /**
+     * Compares rendered page images with a vision-capable OpenAI-compatible model.
+     * This is report-only: image coordinates and artwork reconstruction are not guessed.
+     */
+    fun auditPageImages(context: Context, sourcePage: Bitmap, targetPage: Bitmap): List<VisionFinding> {
+        val settings = loadSettings(context)
+        if (settings.baseUrl.isBlank() || settings.model.isBlank() || settings.apiKey.isBlank()) return emptyList()
+        val sourceData = bitmapDataUrl(sourcePage)
+        val targetData = bitmapDataUrl(targetPage)
+        val prompt = """
+You are auditing a paired PDF page. IMAGE 1 is the original source page (usually English); IMAGE 2 is its translated counterpart (usually Arabic).
+Inspect visible text inside pictures, charts, diagrams, screenshots and labels, not only normal paragraphs.
+Find only meaningful text that is missing, still untranslated, mistranslated, or materially incomplete in IMAGE 2 compared with IMAGE 1. Do not treat different layout, color, or illustration style alone as a translation error. Preserve names, numbers, units and technical meaning. If there is no clear issue, return an empty findings array.
+Return ONLY valid JSON: {"findings":[{"source_text":"...","target_text":"...","issue":"short Arabic explanation","suggested_ar":"complete Arabic wording","confidence":0.0}]}
+Confidence must be 0..1. Do not invent text that cannot be read. Do not provide coordinates. If text is unreadable, omit it.
+""".trimIndent()
+        val content = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", prompt))
+            .put(JSONObject().put("type", "text").put("text", "IMAGE 1 — SOURCE"))
+            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", sourceData)))
+            .put(JSONObject().put("type", "text").put("text", "IMAGE 2 — TRANSLATION"))
+            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", targetData)))
+        val request = JSONObject().apply {
+            put("model", settings.model)
+            put("temperature", 0.1)
+            put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        }
+        val endpoint = settings.baseUrl.trimEnd('/').let {
+            if (it.endsWith("/chat/completions")) it else "$it/chat/completions"
+        }
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20000
+            readTimeout = 60000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        return try {
+            connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            check(code in 200..299) { "Vision API HTTP $code: ${body.take(350)}" }
+            val contentText = JSONObject(body).getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").optString("content").trim()
+            val jsonText = contentText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val findings = JSONObject(jsonText).optJSONArray("findings") ?: JSONArray()
+            buildList {
+                for (i in 0 until findings.length()) {
+                    val item = findings.optJSONObject(i) ?: continue
+                    val source = item.optString("source_text").trim()
+                    val target = item.optString("target_text").trim()
+                    val issue = item.optString("issue").trim()
+                    val suggested = item.optString("suggested_ar").trim()
+                    val confidence = item.optDouble("confidence", 0.0).coerceIn(0.0, 1.0)
+                    if (source.isNotBlank() && issue.isNotBlank()) {
+                        add(VisionFinding(source, target, issue, suggested, confidence))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            throw IllegalStateException("تعذر فحص الصور بالذكاء الاصطناعي: ${e.message ?: e.javaClass.simpleName}", e)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun bitmapDataUrl(bitmap: Bitmap): String {
+        val scale = minOf(1f, 960f / maxOf(bitmap.width, bitmap.height).toFloat())
+        val resized = if (scale < 1f) Bitmap.createScaledBitmap(bitmap,
+            (bitmap.width * scale).toInt().coerceAtLeast(1),
+            (bitmap.height * scale).toInt().coerceAtLeast(1), true) else bitmap
+        val output = ByteArrayOutputStream()
+        try {
+            resized.compress(Bitmap.CompressFormat.JPEG, 72, output)
+            return "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        } finally {
+            output.close()
+            if (resized !== bitmap) resized.recycle()
         }
     }
 

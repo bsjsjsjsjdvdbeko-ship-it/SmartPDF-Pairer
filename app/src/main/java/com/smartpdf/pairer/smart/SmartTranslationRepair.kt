@@ -37,7 +37,8 @@ object SmartTranslationRepair {
         val report: String,
         val translatedRegions: Int,
         val reviewRegions: Int,
-        val pagesProcessed: Int
+        val pagesProcessed: Int,
+        val modifiedPages: Set<Int>
     )
 
     private data class TextRegion(
@@ -72,11 +73,13 @@ object SmartTranslationRepair {
         val translationCache = HashMap<String, String?>()
         var translatedCount = 0
         var reviewCount = 0
+        val modifiedPages = linkedSetOf<Int>()
         val report = StringBuilder()
         report.append("SmartPDF Pairer — تقرير الدمج الذكي وتحسين الترجمة\n")
         report.append("الملف الأصلي: ${sourcePdf.name}\nملف الترجمة: ${translationPdf.name}\n")
         report.append("السياسة: ترجمة النص الإنجليزي المتبقي، وفحص اكتمال كتل عربية قابلة للمطابقة بمقارنة مرجعية احترازية؛ لا تُستبدل العربية إلا عند ظهور نقص واضح جداً ووجود موضع وخلفية آمنين.\n")
-        report.append(if (AiAuditClient.isConfigured(context)) "مراجعة المعنى مفعّلة عبر نموذج AI متوافق مع OpenAI API؛ لا يتم الاستبدال إلا عند ثقة 85% أو أعلى وخلفية آمنة.\n" else "ملاحظة: لا توجد إعدادات AI. يستخدم التطبيق فحص تغطية مرجعي احترازياً، وليس حكماً دلالياً كاملاً. الفقرات الغائبة بالكامل تُعلّم للمراجعة ولا تُنشأ في موضع تخميني.\n")
+        report.append("V1.7: إصلاح نص الصور OCR يدعم الخلفية الموحدة وبعض التدرجات اللونية السلسة فقط؛ الصور والأنسجة والحواف المعقدة تبقى للمراجعة دون طمس.\n")
+        report.append(if (AiAuditClient.isConfigured(context)) "مراجعة المعنى والصور مفعّلة عبر نموذج AI متوافق مع OpenAI API؛ مراجعة الصور تقريرية فقط، أما النصوص العادية فلا يتم استبدالها إلا عند ثقة 85% أو أعلى وخلفية آمنة.\n" else "ملاحظة: لا توجد إعدادات AI. يستخدم التطبيق فحص تغطية مرجعي احترازياً، وليس حكماً دلالياً كاملاً. الفقرات الغائبة بالكامل تُعلّم للمراجعة ولا تُنشأ في موضع تخميني.\n")
         report.append("=".repeat(64)).append('\n')
 
         try {
@@ -88,6 +91,7 @@ object SmartTranslationRepair {
                     require(sourceDoc.numberOfPages > 0) { "ملفات PDF لا تحتوي على صفحات." }
 
                     val targetRenderer = PDFRenderer(translatedDoc)
+                    val sourceRenderer = PDFRenderer(sourceDoc)
                     val nativeStripper = PositionedTextStripper()
                     val total = translatedDoc.numberOfPages
 
@@ -99,6 +103,16 @@ object SmartTranslationRepair {
                         val pageHeight = targetPage.mediaBox.height
                         val targetPageHasCorruptText = isExtractionCorrupt(targetLines)
                         val hasImages = pageHasImageXObjects(targetPage)
+                        val sourceHasImages = pageHasImageXObjects(sourceDoc.getPage(pageIndex))
+                        // A low-resolution visual comparison detects image/layout changes even
+                        // when the PDF stores artwork as vector paths rather than image XObjects.
+                        val visualDifference = try {
+                            val sourceThumb = sourceRenderer.renderImageWithDPI(pageIndex, 48f)
+                            val targetThumb = targetRenderer.renderImageWithDPI(pageIndex, 48f)
+                            try { visualDifferencePercent(sourceThumb, targetThumb) }
+                            finally { sourceThumb.recycle(); targetThumb.recycle() }
+                        } catch (_: Exception) { -1 }
+                        val visualImageMismatch = visualDifference >= 38 || sourceHasImages != hasImages
                         val sourceEnglishCount = sourceLines.count { isEnglishOnly(it.text) }
                         val targetArabicCount = targetLines.count { arabic.containsMatchIn(it.text) }
                         report.append("\nالصفحة ${pageIndex + 1}: الأصل يحتوي $sourceEnglishCount منطقة/سطرًا إنجليزيًا قابلاً للاستخراج، وملف الترجمة يحتوي $targetArabicCount منطقة/سطرًا عربياً قابلاً للاستخراج.")
@@ -109,11 +123,23 @@ object SmartTranslationRepair {
                             report.append(" [تنبيه تغطية محتمل: عدد المناطق العربية أقل بكثير من مناطق الأصل؛ هذا مؤشر تقريبي وليس حكماً على جودة الترجمة]")
                             reviewCount++
                         }
+                        if (visualDifference >= 0) {
+                            report.append("مقارنة بصرية مصغرة: اختلاف تقريبي ${visualDifference}% بين الصفحتين.")
+                            if (visualImageMismatch) report.append(" [اختلاف بصري ملحوظ؛ سيتم فحص عناصر الصفحة بصرياً]")
+                            report.append('\n')
+                        }
+                        if (hasImages && !sourceHasImages) {
+                            report.append("[صورة/عنصر مرئي في صفحة الترجمة دون صورة مقابلة في الأصل؛ فحص OCR للنصوص داخل الصفحة مفعّل. لا تُحذف الصورة تلقائياً.]\n")
+                        } else if (visualImageMismatch) {
+                            report.append("[اختلاف في المحتوى المرئي بين الأصل والترجمة؛ تتم مراجعة نصوص الصور والعناصر المرئية في جهة الترجمة.]\n")
+                        }
                         report.append('\n')
 
                         var ocrBitmap: Bitmap? = null
+                        var sourceOcrBitmap: Bitmap? = null
+                        var sourceOcrRegions = emptyList<TextRegion>()
                         var ocrRegions = emptyList<TextRegion>()
-                        if (targetPageHasCorruptText || hasImages) {
+                        if (targetPageHasCorruptText || hasImages || visualImageMismatch) {
                             try {
                                 if (!ocrInitializationAttempted) {
                                     ocrInitializationAttempted = true
@@ -131,6 +157,15 @@ object SmartTranslationRepair {
                                     tesseract?.setImage(ocrBitmap)
                                     val hocr = tesseract?.let { invokeHocr(it) }.orEmpty()
                                     ocrRegions = parseHocr(hocr, dpi)
+                                    // OCR both sides when visual artwork differs. This lets the
+                                    // report distinguish text visible only in the translation-side
+                                    // artwork from text that is already present in the source page.
+                                    if (visualImageMismatch || sourceHasImages) {
+                                        sourceOcrBitmap = sourceRenderer.renderImageWithDPI(pageIndex, dpi)
+                                        tesseract?.setImage(sourceOcrBitmap)
+                                        sourceOcrRegions = parseHocr(tesseract?.let { invokeHocr(it) }.orEmpty(), dpi)
+                                        tesseract?.clear()
+                                    }
                                     if (ocrRegions.isEmpty()) {
                                         report.append("الصفحة ${pageIndex + 1}: لم يوفر OCR إحداثيات hOCR موثوقة؛ لم يتم إدراج نص عشوائي.\n")
                                     }
@@ -146,10 +181,50 @@ object SmartTranslationRepair {
                             isEnglishOnly(it.text) && normalize(it.text) !in nativeKeys
                         }
                         val candidates = if (targetPageHasCorruptText) imageCandidates else nativeCandidates + imageCandidates
+                        val sourceVisibleKeys = (sourceLines + sourceOcrRegions).map { normalize(it.text) }.toSet()
+                        val targetOnlyImageText = imageCandidates.filter { normalize(it.text) !in sourceVisibleKeys }
+                        if (targetOnlyImageText.isNotEmpty()) {
+                            report.append("[نص داخل صورة/عنصر مرئي في جهة الترجمة دون مقابل نصي واضح في الأصل] تم العثور على ${targetOnlyImageText.size} منطقة OCR؛ ستدخل مناطق الإنجليزية منها مسار الترجمة الآمن.\n")
+                        }
 
                         if (candidates.isNotEmpty()) {
                             report.append("\nالصفحة ${pageIndex + 1}: اكتشاف ${candidates.size} منطقة إنجليزية متبقية.\n")
                         }
+                        // V1.6: multimodal page audit checks text embedded in screenshots,
+                        // charts and illustrations. Findings are report-only until a safe
+                        // region segmentation/inpainting pipeline can prove exact geometry.
+                        if (AiAuditClient.isConfigured(context) &&
+                            (hasImages || sourceHasImages || visualImageMismatch)) {
+                            var sourceVisionBitmap: Bitmap? = null
+                            var targetVisionBitmap: Bitmap? = null
+                            try {
+                                val sourceVision = sourceRenderer.renderImageWithDPI(pageIndex, 96f)
+                                sourceVisionBitmap = sourceVision
+                                val targetVision = targetRenderer.renderImageWithDPI(pageIndex, 96f)
+                                targetVisionBitmap = targetVision
+                                val visionFindings = AiAuditClient.auditPageImages(
+                                    context, sourceVision, targetVision
+                                )
+                                if (visionFindings.isEmpty()) {
+                                    report.append("[فحص الصور بالذكاء الاصطناعي] لم يُكتشف نقص نصي واضح داخل الصور أو الرسومات.\n")
+                                } else {
+                                    report.append("[فحص الصور بالذكاء الاصطناعي] اكتشاف ${visionFindings.size} ملاحظة داخل الصور/الرسومات؛ لم يتم طمس أو تعديل الصور تلقائياً.\n")
+                                    visionFindings.forEachIndexed { findingIndex, finding ->
+                                        report.append("  ${findingIndex + 1}) ثقة ${(finding.confidence * 100).toInt()}% — ${finding.issue}\n")
+                                        report.append("     النص في الأصل: ${finding.sourceText}\n")
+                                        if (finding.targetText.isNotBlank()) report.append("     النص في الترجمة: ${finding.targetText}\n")
+                                        if (finding.suggestedArabic.isNotBlank()) report.append("     اقتراح عربي: ${finding.suggestedArabic}\n")
+                                        reviewCount++
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                report.append("[تعذر فحص الصور بالذكاء الاصطناعي] ${e.message ?: e.javaClass.simpleName}\n")
+                            } finally {
+                                sourceVisionBitmap?.recycle()
+                                targetVisionBitmap?.recycle()
+                            }
+                        }
+
                         // Render a visual sample even for text-only pages: vector backgrounds
                         // can also be non-white and must not be painted over blindly.
                         val backgroundBitmap = ocrBitmap ?: try {
@@ -198,10 +273,12 @@ object SmartTranslationRepair {
                                 if (aiAudit.status == "good") continue
                                 if (aiAudit.confidence >= 0.85 && aiAudit.correctedArabic.isNotBlank()) {
                                     val safeBox = backgroundBitmap?.let { pointsToBitmapBox(targetRegion, pageWidth, pageHeight, it) }
-                                    val safeBackground = backgroundBitmap != null && safeBox != null && isWhiteBackground(backgroundBitmap, safeBox)
-                                    if (safeBackground && drawReplacement(translatedDoc, pageIndex, targetRegion,
-                                            aiAudit.correctedArabic, pageWidth, pageHeight)) {
+                                    val safeColor = if (backgroundBitmap != null && safeBox != null)
+                                        sampleFlatBackgroundColor(backgroundBitmap, safeBox) else null
+                                    if (safeColor != null && drawReplacement(translatedDoc, pageIndex, targetRegion,
+                                            aiAudit.correctedArabic, pageWidth, pageHeight, safeColor)) {
                                         translatedCount++
+                                        modifiedPages.add(pageIndex)
                                         semanticRepaired.add(targetKey)
                                         report.append("[تم إصلاح الترجمة بتوصية AI عالية الثقة]\nEN: ${sourceRegion.text}\nAR: ${aiAudit.correctedArabic}\n")
                                     } else {
@@ -235,13 +312,14 @@ object SmartTranslationRepair {
                             val safeBox = backgroundBitmap?.let {
                                 pointsToBitmapBox(targetRegion, pageWidth, pageHeight, it)
                             }
-                            val safeBackground = backgroundBitmap != null && safeBox != null &&
-                                isWhiteBackground(backgroundBitmap, safeBox)
-                            if (safeBackground && drawReplacement(
+                            val safeColor = if (backgroundBitmap != null && safeBox != null)
+                                sampleFlatBackgroundColor(backgroundBitmap, safeBox) else null
+                            if (safeColor != null && drawReplacement(
                                     translatedDoc, pageIndex, targetRegion, referenceArabic,
-                                    pageWidth, pageHeight
+                                    pageWidth, pageHeight, safeColor
                                 )) {
                                 translatedCount++
+                                modifiedPages.add(pageIndex)
                                 semanticRepaired.add(targetKey)
                                 report.append("[إصلاح جودة محتمل] تشابه منخفض جداً مع ترجمة مرجعية (${(similarity * 100).toInt()}%)؛ استُبدلت المنطقة العربية المقابلة بحذر.\n")
                                 report.append("EN: ${sourceRegion.text}\nAR: $referenceArabic\n")
@@ -267,7 +345,8 @@ object SmartTranslationRepair {
 
                             val placement = if (region.fromOcr) {
                                 val box = region.bitmapBox
-                                if (box == null || ocrBitmap == null || !isWhiteBackground(ocrBitmap, box)) null
+                                if (box == null || ocrBitmap == null ||
+                                    !hasSafeBackground(ocrBitmap, box)) null
                                 else {
                                     val sx = pageWidth / ocrBitmap.width.toFloat()
                                     val sy = pageHeight / ocrBitmap.height.toFloat()
@@ -284,17 +363,26 @@ object SmartTranslationRepair {
                                 }
                             } else region
 
-                            val backgroundSafe = when {
-                                region.fromOcr -> ocrBitmap != null && region.bitmapBox != null && isWhiteBackground(ocrBitmap, region.bitmapBox)
-                                backgroundBitmap != null -> isWhiteBackground(backgroundBitmap, pointsToBitmapBox(placement ?: region, pageWidth, pageHeight, backgroundBitmap))
-                                else -> false
+                            val ocrBackgroundPatch = if (region.fromOcr && ocrBitmap != null && region.bitmapBox != null &&
+                                sampleFlatBackgroundColor(ocrBitmap, region.bitmapBox) == null)
+                                createSmoothBackgroundPatch(ocrBitmap, region.bitmapBox) else null
+                            val backgroundColor = when {
+                                region.fromOcr -> if (ocrBitmap != null && region.bitmapBox != null)
+                                    sampleFlatBackgroundColor(ocrBitmap, region.bitmapBox) else null
+                                backgroundBitmap != null -> sampleFlatBackgroundColor(
+                                    backgroundBitmap,
+                                    pointsToBitmapBox(placement ?: region, pageWidth, pageHeight, backgroundBitmap)
+                                )
+                                else -> null
                             }
-                            if (placement == null || !backgroundSafe) {
+                            if (placement == null || (backgroundColor == null && ocrBackgroundPatch == null)) {
+                                ocrBackgroundPatch?.recycle()
                                 reviewCount++
                                 report.append("[مراجعة] لم يتم التعديل لأن موضع النص أو خلفيته غير آمن: $rawText\n")
                                 continue
                             }
                             if (region.confidence < 65) {
+                                ocrBackgroundPatch?.recycle()
                                 reviewCount++
                                 report.append("[مراجعة] ثقة OCR منخفضة (${region.confidence}%): $rawText\n")
                                 continue
@@ -306,10 +394,14 @@ object SmartTranslationRepair {
                                 placement,
                                 translated,
                                 pageWidth,
-                                pageHeight
+                                pageHeight,
+                                backgroundColor ?: android.graphics.Color.WHITE,
+                                ocrBackgroundPatch
                             )
+                            ocrBackgroundPatch?.recycle()
                             if (success) {
                                 translatedCount++
+                                modifiedPages.add(pageIndex)
                                 report.append("[تمت الترجمة والإضافة في الموضع نفسه]\nEN: $rawText\nAR: $translated\n")
                             } else {
                                 reviewCount++
@@ -322,6 +414,7 @@ object SmartTranslationRepair {
                         onProgress(pageIndex + 1, total, "معالجة الصفحة ${pageIndex + 1} من $total")
                         if (backgroundBitmap !== ocrBitmap) backgroundBitmap?.recycle()
                         ocrBitmap?.recycle()
+                        sourceOcrBitmap?.recycle()
                         tesseract?.clear()
                     }
 
@@ -355,9 +448,11 @@ object SmartTranslationRepair {
         report.append("الصفحات: ${PDDocument.load(outputPdf).use { it.numberOfPages }}\n")
         report.append("المناطق التي تمت ترجمتها وإضافتها: $translatedCount\n")
         report.append("المناطق التي تحتاج مراجعة أو تعذر تعديلها: $reviewCount\n")
+        report.append("الصفحات التي تحتوي تعديلات آلية: ${modifiedPages.sorted().joinToString(", ") { (it + 1).toString() }.ifBlank { "لا توجد" }}\n")
         report.append("تنبيه: لا يعني عدم اكتشاف نص متبقٍ أن كل فقرة غائبة قد تمت ترجمتها؛ يجب مراجعة التقرير والصفحات.\n")
 
-        return Result(outputPdf, report.toString(), translatedCount, reviewCount, totalPages(outputPdf))
+        return Result(outputPdf, report.toString(), translatedCount, reviewCount,
+            totalPages(outputPdf), modifiedPages.toSet())
     }
 
     private fun totalPages(file: File): Int = PDDocument.load(file).use { it.numberOfPages }
@@ -467,7 +562,9 @@ object SmartTranslationRepair {
         region: TextRegion,
         translated: String,
         pageWidth: Float,
-        pageHeight: Float
+        pageHeight: Float,
+        backgroundColor: Int = android.graphics.Color.WHITE,
+        backgroundPatch: Bitmap? = null
     ): Boolean {
         var overlay: Bitmap? = null
         return try {
@@ -477,7 +574,7 @@ object SmartTranslationRepair {
             val rectHeight = max(originalHeight * 1.55f, 13f)
             val rectX = region.x.coerceAtLeast(0f)
             val rectY = (baseline - originalHeight * 0.48f).coerceAtLeast(0f)
-            val rectWidth = region.width + 2f
+            val rectWidth = availableWidth + 2f
             if (rectX + rectWidth > pageWidth + 2f || rectY + rectHeight > pageHeight + 2f) return false
 
             // Render at 4x page-point scale for crisp Arabic glyph edges when zoomed.
@@ -487,7 +584,14 @@ object SmartTranslationRepair {
             val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
             overlay = bitmap
             val canvas = Canvas(bitmap)
-            canvas.drawColor(android.graphics.Color.WHITE)
+            if (backgroundPatch != null && !backgroundPatch.isRecycled) {
+                val source = android.graphics.Rect(0, 0, backgroundPatch.width, backgroundPatch.height)
+                val destination = android.graphics.Rect(0, 0, bitmapWidth, bitmapHeight)
+                val patchPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+                canvas.drawBitmap(backgroundPatch, source, destination, patchPaint)
+            } else {
+                canvas.drawColor(backgroundColor)
+            }
 
             if (translated.contains('\n') || translated.contains('\r')) return false
             val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
@@ -680,29 +784,138 @@ object SmartTranslationRepair {
         )
     }
 
-    private fun isWhiteBackground(bitmap: Bitmap, box: IntArray): Boolean {
+    /**
+     * Returns a sampled solid background color around an OCR/text box only when the
+     * surrounding pixels are sufficiently uniform. This supports pale/color panels
+     * in diagrams while refusing textured photos and complex artwork.
+     */
+    private fun sampleFlatBackgroundColor(bitmap: Bitmap, box: IntArray): Int? {
         val left = box[0].coerceAtLeast(0)
         val top = box[1].coerceAtLeast(0)
         val right = box[2].coerceAtMost(bitmap.width - 1)
         val bottom = box[3].coerceAtMost(bitmap.height - 1)
-        if (right <= left || bottom <= top) return false
+        if (right <= left || bottom <= top) return null
         val margin = 5
-        var tested = 0
-        var white = 0
-        val sampleStepX = max(1, (right - left) / 30)
-        val sampleStepY = max(1, (bottom - top) / 12)
-        for (x in (left - margin).coerceAtLeast(0)..(right + margin).coerceAtMost(bitmap.width - 1) step sampleStepX) {
-            for (y in (top - margin).coerceAtLeast(0)..(bottom + margin).coerceAtMost(bitmap.height - 1) step sampleStepY) {
+        val colors = ArrayList<Int>(96)
+        val x1 = (left - margin).coerceAtLeast(0)
+        val x2 = (right + margin).coerceAtMost(bitmap.width - 1)
+        val y1 = (top - margin).coerceAtLeast(0)
+        val y2 = (bottom + margin).coerceAtMost(bitmap.height - 1)
+        val stepX = max(1, (x2 - x1) / 24)
+        val stepY = max(1, (y2 - y1) / 12)
+        for (x in x1..x2 step stepX) {
+            for (y in y1..y2 step stepY) {
+                // Sample the outer ring only, never the glyphs inside the OCR box.
                 if (x in left..right && y in top..bottom) continue
-                val color = bitmap.getPixel(x, y)
-                val r = (color shr 16) and 0xff
-                val g = (color shr 8) and 0xff
-                val b = color and 0xff
-                tested++
-                if (r > 232 && g > 232 && b > 232) white++
+                colors.add(bitmap.getPixel(x, y))
             }
         }
-        return tested > 0 && white.toFloat() / tested >= 0.90f
+        if (colors.size < 8) return null
+        val meanR = colors.map { (it shr 16) and 0xff }.average()
+        val meanG = colors.map { (it shr 8) and 0xff }.average()
+        val meanB = colors.map { it and 0xff }.average()
+        val deviation = colors.map { color ->
+            (kotlin.math.abs(((color shr 16) and 0xff) - meanR) +
+             kotlin.math.abs(((color shr 8) and 0xff) - meanG) +
+             kotlin.math.abs((color and 0xff) - meanB)) / 3.0
+        }.average()
+        if (deviation > 17.0) return null
+        return android.graphics.Color.rgb(meanR.toInt().coerceIn(0, 255),
+            meanG.toInt().coerceIn(0, 255), meanB.toInt().coerceIn(0, 255))
+    }
+
+    private fun hasSafeBackground(bitmap: Bitmap, box: IntArray): Boolean {
+        if (sampleFlatBackgroundColor(bitmap, box) != null) return true
+        val patch = createSmoothBackgroundPatch(bitmap, box) ?: return false
+        patch.recycle()
+        return true
+    }
+
+    /**
+     * Conservative local inpainting for smooth backgrounds only. A bilinear surface is
+     * estimated from the four outer corners; if sampled perimeter pixels do not agree
+     * with that surface, the region is rejected (photos, textures, edges and diagrams).
+     */
+    private fun createSmoothBackgroundPatch(bitmap: Bitmap, box: IntArray): Bitmap? {
+        val left = (box[0] - 2).coerceAtLeast(0)
+        val top = (box[1] - 2).coerceAtLeast(0)
+        val right = (box[2] + 2).coerceAtMost(bitmap.width - 1)
+        val bottom = (box[3] + 2).coerceAtMost(bitmap.height - 1)
+        val width = right - left + 1
+        val height = bottom - top + 1
+        if (width < 8 || height < 8 || width > 1200 || height > 600) return null
+        fun rgb(c: Int, channel: Int) = when (channel) {
+            0 -> android.graphics.Color.red(c).toDouble()
+            1 -> android.graphics.Color.green(c).toDouble()
+            else -> android.graphics.Color.blue(c).toDouble()
+        }
+        val c00 = bitmap.getPixel(left, top)
+        val c10 = bitmap.getPixel(right, top)
+        val c01 = bitmap.getPixel(left, bottom)
+        val c11 = bitmap.getPixel(right, bottom)
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        var errorSum = 0.0
+        var samples = 0
+        var maxError = 0.0
+        for (y in 0 until height) {
+            val v = y.toDouble() / (height - 1).coerceAtLeast(1)
+            for (x in 0 until width) {
+                val u = x.toDouble() / (width - 1).coerceAtLeast(1)
+                val channels = DoubleArray(3)
+                for (ch in 0..2) {
+                    val topMix = rgb(c00, ch) * (1 - u) + rgb(c10, ch) * u
+                    val bottomMix = rgb(c01, ch) * (1 - u) + rgb(c11, ch) * u
+                    channels[ch] = topMix * (1 - v) + bottomMix * v
+                }
+                val estimated = android.graphics.Color.rgb(
+                    channels[0].toInt().coerceIn(0, 255),
+                    channels[1].toInt().coerceIn(0, 255),
+                    channels[2].toInt().coerceIn(0, 255)
+                )
+                // Validate only the outer ring, where original glyphs are absent.
+                val onRing = x < 2 || y < 2 || x >= width - 2 || y >= height - 2
+                if (onRing) {
+                    val actual = bitmap.getPixel(left + x, top + y)
+                    val err = (kotlin.math.abs(android.graphics.Color.red(actual) - android.graphics.Color.red(estimated)) +
+                        kotlin.math.abs(android.graphics.Color.green(actual) - android.graphics.Color.green(estimated)) +
+                        kotlin.math.abs(android.graphics.Color.blue(actual) - android.graphics.Color.blue(estimated))) / 3.0
+                    errorSum += err
+                    samples++
+                    if (err > maxError) maxError = err
+                }
+                out.setPixel(x, y, estimated)
+            }
+        }
+        val meanError = if (samples == 0) 999.0 else errorSum / samples
+        if (meanError > 12.0 || maxError > 42.0) {
+            out.recycle()
+            return null
+        }
+        return out
+    }
+
+    /** Percentage of visibly different sample cells between two rendered page thumbnails. */
+    private fun visualDifferencePercent(first: Bitmap, second: Bitmap): Int {
+        val columns = 28
+        val rows = 36
+        var different = 0
+        var total = 0
+        for (row in 0 until rows) {
+            for (column in 0 until columns) {
+                val x1 = ((column + 0.5f) * first.width / columns).toInt().coerceIn(0, first.width - 1)
+                val y1 = ((row + 0.5f) * first.height / rows).toInt().coerceIn(0, first.height - 1)
+                val x2 = ((column + 0.5f) * second.width / columns).toInt().coerceIn(0, second.width - 1)
+                val y2 = ((row + 0.5f) * second.height / rows).toInt().coerceIn(0, second.height - 1)
+                val a = first.getPixel(x1, y1)
+                val b = second.getPixel(x2, y2)
+                val delta = kotlin.math.abs(android.graphics.Color.red(a) - android.graphics.Color.red(b)) +
+                    kotlin.math.abs(android.graphics.Color.green(a) - android.graphics.Color.green(b)) +
+                    kotlin.math.abs(android.graphics.Color.blue(a) - android.graphics.Color.blue(b))
+                if (delta > 72) different++
+                total++
+            }
+        }
+        return if (total == 0) 0 else (different * 100f / total).toInt()
     }
 
     private fun translate(text: String): String? {

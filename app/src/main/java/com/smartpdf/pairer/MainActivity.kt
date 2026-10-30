@@ -40,6 +40,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewButton: Button
     private var pendingOcrReport: String? = null
     private var pendingSmartReport: String? = null
+    private var pendingSmartOriginalFile: File? = null
+    private var pendingSmartArabicOriginalFile: File? = null
+    private var pendingSmartArabicRepairedFile: File? = null
+    private var pendingSmartPlaceArabicLeft: Boolean = true
 
     private var originalUri: Uri? = null
     private var arabicUri: Uri? = null
@@ -57,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         private const val CREATE_OUTPUT = 1003
         private const val CREATE_OCR_REPORT = 1004
         private const val CREATE_SMART_REPORT = 1005
+        private const val REVIEW_SMART_RESULT = 1006
         private const val OUTPUT_FILE_NAME = "Bilingual_Final.pdf"
     }
 
@@ -117,7 +122,7 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { addView(content) }
         AlertDialog.Builder(this)
             .setTitle("إعدادات مراجعة AI")
-            .setMessage("يدعم أي مزود يقدم واجهة متوافقة مع OpenAI Chat Completions. لا يوجد مفتاح مضمّن في التطبيق؛ يُحفظ المفتاح مشفراً باستخدام Android Keystore.")
+            .setMessage("يدعم أي مزود يقدم واجهة متوافقة مع OpenAI Chat Completions. لفحص الصور اختر نموذجاً يدعم Vision وإدخال الصور. صفحات PDF المرسلة للفحص ستصل إلى المزود المحدد. لا يوجد مفتاح مضمّن في التطبيق؛ يُحفظ المفتاح مشفراً باستخدام Android Keystore.")
             .setView(scroll)
             .setNegativeButton("إلغاء", null)
             .setPositiveButton("حفظ الإعدادات", null)
@@ -165,9 +170,19 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != Activity.RESULT_OK) {
+            if (requestCode == REVIEW_SMART_RESULT) {
+                status.text = "تم إلغاء المراجعة. لم يتم اعتماد التحسينات ولم يُنشأ ملف الدمج النهائي. يمكنك إعادة الدمج المتقدم للمراجعة من جديد."
+                return
+            }
             if (requestCode == CREATE_OUTPUT) {
                 status.text = "تم إنشاء الملف مؤقتًا. يمكنك حفظه لاحقًا باستخدام زر حفظ / تصدير."
             }
+            return
+        }
+        if (requestCode == REVIEW_SMART_RESULT) {
+            val approvedPages = data?.getIntArrayExtra(PdfComparePreviewActivity.EXTRA_APPROVED_PAGES)
+                ?.toSet() ?: emptySet()
+            continueSmartPairing(approvedPages)
             return
         }
         val uri = data?.data ?: return
@@ -354,29 +369,76 @@ class MainActivity : AppCompatActivity() {
                     updateProgress(8 + if (total == 0) 0 else completed * 52 / total, 100, message)
                 }
                 pendingSmartReport = repairResult.report
-
-                PdfPairer.build(
-                    originalTemp,
-                    repairedArabic,
-                    outputTemp,
-                    placeArabicOnLeft
-                ) { completed, total ->
-                    updateProgress(60 + completed * 38 / total, 100, "دمج الصفحات المحسّنة: $completed من $total")
+                pendingSmartOriginalFile = originalTemp
+                pendingSmartArabicOriginalFile = arabicTemp
+                pendingSmartArabicRepairedFile = repairedArabic
+                pendingSmartPlaceArabicLeft = placeArabicOnLeft
+                runOnUiThread {
+                    setBusy(false)
+                    progress.progress = 100
+                    status.text = "اكتمل الفحص والإصلاح الأولي: ${repairResult.translatedRegions} منطقة عولجت، و${repairResult.reviewRegions} منطقة تحتاج مراجعة.\nراجع الصفحات قبل اعتماد أي تعديل."
+                    updateActionButtons()
+                    openSmartReviewPreview(arabicTemp, repairedArabic, repairResult.modifiedPages)
                 }
-                require(outputTemp.isFile && outputTemp.length() > 0L) { "لم يتم إنشاء ملف الدمج الذكي." }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    setBusy(false)
+                    status.text = "فشل الدمج الذكي: ${friendlyError(e)}"
+                    updateActionButtons()
+                }
+            }
+        }
+    }
+
+    private fun openSmartReviewPreview(originalArabicFile: File, repairedArabicFile: File, modifiedPages: Set<Int>) {
+        val before = FileProvider.getUriForFile(this, "$packageName.fileprovider", originalArabicFile)
+        val after = FileProvider.getUriForFile(this, "$packageName.fileprovider", repairedArabicFile)
+        startActivityForResult(Intent(this, PdfComparePreviewActivity::class.java).apply {
+            putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_URI, before.toString())
+            putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_URI, after.toString())
+            putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_NAME, "الترجمة قبل التحسين")
+            putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_NAME, "الترجمة بعد التحسين")
+            putExtra(PdfComparePreviewActivity.EXTRA_REVIEW_MODE, true)
+            putExtra(PdfComparePreviewActivity.EXTRA_MODIFIED_PAGES, modifiedPages.toIntArray())
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }, REVIEW_SMART_RESULT)
+    }
+
+    /** User approval is required before the repaired translation is used in the final pair. */
+    private fun continueSmartPairing(approvedPages: Set<Int>) {
+        val originalFile = pendingSmartOriginalFile
+        val originalArabic = pendingSmartArabicOriginalFile
+        val repairedArabic = pendingSmartArabicRepairedFile
+        if (originalFile == null || originalArabic == null || repairedArabic == null) {
+            status.text = "ملفات المراجعة المؤقتة غير متاحة. أعد عملية الدمج المتقدم."
+            return
+        }
+        val selectedArabic = File(cacheDir, "smart_arabic_selected_pages.pdf")
+        val outputTemp = File(cacheDir, "Bilingual_Smart_Final.pdf")
+        setBusy(true, 60, if (approvedPages.isEmpty()) "لم تعتمد أي صفحة؛ سيتم استخدام الترجمة الأصلية بالكامل..." else "تطبيق اختياراتك صفحة بصفحة وإنشاء الملف النهائي...")
+        executor.execute {
+            try {
+                PdfPairer.buildSelectiveTranslation(originalArabic, repairedArabic, selectedArabic, approvedPages)
+                PdfPairer.build(originalFile, selectedArabic, outputTemp, pendingSmartPlaceArabicLeft) { completed, total ->
+                    updateProgress(60 + completed * 38 / total, 100, "إنشاء الملف النهائي: $completed من $total")
+                }
+                require(outputTemp.isFile && outputTemp.length() > 0L) { "لم يتم إنشاء ملف الدمج النهائي." }
                 generatedFile = outputTemp
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
-                    status.text = "اكتمل الدمج الذكي. تمت معالجة ${repairResult.translatedRegions} منطقة، وتحتاج ${repairResult.reviewRegions} منطقة إلى مراجعة.\n" +
-                        "سيتم حفظ PDF ثم عرض خيار حفظ التقرير."
+                    status.text = if (approvedPages.isEmpty()) {
+                        "لم تعتمد أي تحسين؛ تم استخدام ملف الترجمة الأصلي بالكامل. اختر مكان الحفظ."
+                    } else {
+                        "تم اعتماد تحسينات ${approvedPages.size} صفحة فقط، وبقية الصفحات من الترجمة الأصلية. اختر مكان الحفظ."
+                    }
                     updateActionButtons()
                     launchSavePicker()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     setBusy(false)
-                    status.text = "فشل الدمج الذكي: ${friendlyError(e)}"
+                    status.text = "تعذر إنشاء الدمج بعد المراجعة: ${friendlyError(e)}"
                     updateActionButtons()
                 }
             }

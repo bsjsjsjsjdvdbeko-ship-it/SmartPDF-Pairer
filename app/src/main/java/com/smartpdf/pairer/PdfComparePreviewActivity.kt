@@ -1,5 +1,6 @@
 package com.smartpdf.pairer
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
@@ -8,6 +9,7 @@ import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -24,6 +26,10 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         const val EXTRA_ARABIC_URI = "arabic_uri"
         const val EXTRA_ORIGINAL_NAME = "original_name"
         const val EXTRA_ARABIC_NAME = "arabic_name"
+        const val EXTRA_REVIEW_MODE = "review_mode"
+        const val EXTRA_ACCEPTED = "review_accepted"
+        const val EXTRA_MODIFIED_PAGES = "modified_pages"
+        const val EXTRA_APPROVED_PAGES = "approved_pages"
     }
 
     private lateinit var originalImage: ImageView
@@ -32,6 +38,9 @@ class PdfComparePreviewActivity : AppCompatActivity() {
     private lateinit var loading: ProgressBar
     private lateinit var previous: Button
     private lateinit var next: Button
+    private lateinit var approveCurrentPage: CheckBox
+    private val modifiedPages = linkedSetOf<Int>()
+    private val approvedPages = linkedSetOf<Int>()
     private val worker = Executors.newSingleThreadExecutor()
     private var originalRenderer: PdfRenderer? = null
     private var arabicRenderer: PdfRenderer? = null
@@ -51,6 +60,30 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         loading = findViewById(R.id.previewLoading)
         previous = findViewById(R.id.previousPage)
         next = findViewById(R.id.nextPage)
+        approveCurrentPage = findViewById(R.id.approveCurrentPage)
+        intent.getIntArrayExtra(EXTRA_MODIFIED_PAGES)?.forEach { modifiedPages.add(it) }
+        approvedPages.addAll(modifiedPages)
+        approveCurrentPage.setOnCheckedChangeListener { _, checked ->
+            if (pageIndex in modifiedPages) {
+                if (checked) approvedPages.add(pageIndex) else approvedPages.remove(pageIndex)
+            }
+        }
+        val reviewMode = intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)
+        val reviewActions = findViewById<View>(R.id.reviewActions)
+        reviewActions.visibility = if (reviewMode) View.VISIBLE else View.GONE
+        if (reviewMode) {
+            findViewById<Button>(R.id.acceptChanges).setOnClickListener {
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCEPTED, true)
+                    .putExtra(EXTRA_APPROVED_PAGES, approvedPages.toIntArray()))
+                finish()
+            }
+            findViewById<Button>(R.id.rejectChanges).setOnClickListener {
+                setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCEPTED, false)
+                    .putExtra(EXTRA_APPROVED_PAGES, intArrayOf()))
+                finish()
+            }
+            pageLabel.text = "حدد الصفحات التي توافق على تحسيناتها؛ الصفحات غير المحددة ستبقى من ملف الترجمة الأصلي."
+        }
         findViewById<TextView>(R.id.originalPreviewTitle).text =
             intent.getStringExtra(EXTRA_ORIGINAL_NAME) ?: "Original PDF"
         findViewById<TextView>(R.id.arabicPreviewTitle).text =
@@ -109,6 +142,16 @@ class PdfComparePreviewActivity : AppCompatActivity() {
     private fun showPage(index: Int) {
         if (index !in 0 until totalPages) return
         pageIndex = index
+        approveCurrentPage.isEnabled = index in modifiedPages
+        approveCurrentPage.visibility = if (intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)) View.VISIBLE else View.GONE
+        approveCurrentPage.setOnCheckedChangeListener(null)
+        approveCurrentPage.isChecked = index in approvedPages
+        approveCurrentPage.text = if (index in modifiedPages) "اعتماد تحسينات الصفحة ${index + 1}" else "لا توجد تعديلات آلية في هذه الصفحة"
+        approveCurrentPage.setOnCheckedChangeListener { _, checked ->
+            if (pageIndex in modifiedPages) {
+                if (checked) approvedPages.add(pageIndex) else approvedPages.remove(pageIndex)
+            }
+        }
         loading.visibility = View.VISIBLE
         previous.isEnabled = index > 0
         next.isEnabled = index < totalPages - 1

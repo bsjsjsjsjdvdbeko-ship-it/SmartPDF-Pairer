@@ -112,7 +112,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="يقارن كل صفحة، ويبحث عن الإنجليزية المتبقية والنص المختلط، ويفحص الصور عبر OCR. يستبدل المناطق الآمنة فقط، ويسجل النواقص والمواضع غير الآمنة في تقرير للمراجعة."
+            android:text="يقارن كل صفحة ويبحث عن الإنجليزية المتبقية والنص المختلط. يفحص النص داخل الصور والرسومات عند إعداد نموذج Vision. بعد المعالجة ستراجع النسخة المحسّنة صفحة بصفحة وتختار اعتماد التحسينات أو رفضها قبل إنشاء الملف النهائي."
             android:textSize="12sp" />
 
         <Button
@@ -120,7 +120,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="إعدادات مراجعة الترجمة بالذكاء الاصطناعي" />
+            android:text="إعدادات تدقيق الترجمة والصور بالذكاء الاصطناعي" />
 
         <TextView
             android:layout_width="match_parent"

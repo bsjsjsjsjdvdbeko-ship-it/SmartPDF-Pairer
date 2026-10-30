@@ -94,3 +94,37 @@ Build/device verification is still required. This archive update does not claim 
 - AI calls require the user's own compatible API endpoint, model and key, plus internet access. No key or paid service is bundled.
 
 Build/device verification remains pending; this source update has not been represented as a successful APK build or device test.
+
+
+## V1.5.3 — Visual page and image-text audit
+
+- Adds a low-resolution page-to-page visual difference signal. A strong mismatch or differing image-XObject presence triggers OCR even when native PDF text extraction appears valid.
+- When visual artwork differs, OCR can inspect both source and translation pages and flag OCR text visible only on the translation side. English OCR regions enter the existing translation path with hOCR coordinates.
+- Replacement overlays can sample a locally uniform colored background, not only white. Textured/complex image backgrounds remain review-only to avoid destroying diagrams or photographs.
+- This is conservative image-text extraction and overlay, not full image reconstruction or semantic object matching. Page-count equality is still required.
+- Gradle build/device validation remains pending in this environment.
+
+## V1.6.0 — Multimodal image-text audit
+
+- Adds an OpenAI-compatible multimodal page audit for suspicious pages containing images or significant visual differences. The source and translated page are sent together as resized JPEG data URLs.
+- The vision model can report missing, untranslated, or materially mistranslated text inside diagrams, screenshots, labels, and illustrations, including a suggested Arabic wording and confidence.
+- Vision findings are report-only. The app does not erase or repaint complex image regions from model-generated guesses; precise segmentation and inpainting are not implemented.
+- The configured model/provider must support image input. Page content is sent to that configured provider over HTTPS, so users should avoid sending confidential PDFs to providers they do not trust.
+- Gradle build and device validation remain pending unless separately completed.
+
+
+## V1.7.0 — Conservative image-text reconstruction
+- Adds OCR-box-based local background reconstruction for image text on flat fills and carefully validated smooth gradients.
+- Uses a bilinear color surface estimated from the patch corners and rejects regions whose perimeter does not fit the estimate.
+- Keeps OCR confidence and Arabic text-fit checks; complex photos, textures, intersecting lines and diagrams remain report-only/manual review.
+- This is not general-purpose image inpainting and does not use AI-invented coordinates.
+
+
+## V1.8.0 — Review before accepting repairs
+
+The advanced merge now pauses after repair and opens a page-by-page comparison of the original and repaired translation. The user must explicitly accept the repaired translation or reject all automated changes and continue with the untouched original translation. Leaving the review screen without a decision does not approve changes. Normal merge remains unchanged. This is a human-approval stage, not a claim of complex-image AI inpainting; image-edit APIs require a separately configured provider capability. See `STAGE_V1.8.0_AR.md`.
+
+
+## V1.9.0 — Page-level approval and selective repair
+
+Advanced merge now records exactly which pages received automated overlays. During review, each modified page has an approval checkbox. The final Arabic PDF is assembled by importing approved repaired pages and untouched original-translation pages for all rejected or unmodified pages. This prevents a user from having to accept or reject every repair as one batch. The existing conservative smooth-background patch estimator remains limited to locally smooth surfaces; complex photos/textures are not automatically inpainted. This is page-level approval, not per-OCR-box approval or a claim of generative AI inpainting. Normal merge remains unchanged. See `STAGE_V1.9.0_AR.md`.

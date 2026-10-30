@@ -46,6 +46,37 @@ object PdfPairer {
         require(outputFile.isFile && outputFile.length() > 0L) { "لم يتم إنشاء ملف PDF صالح." }
     }
 
+
+    /**
+     * Builds a translation PDF from page-by-page human decisions. Pages in approvedPages
+     * come from the repaired document; every other page is copied from the untouched source.
+     */
+    fun buildSelectiveTranslation(
+        originalArabicFile: File,
+        repairedArabicFile: File,
+        outputFile: File,
+        approvedPages: Set<Int>
+    ) {
+        require(originalArabicFile.isFile && repairedArabicFile.isFile) { "ملفات الترجمة للمراجعة غير متاحة." }
+        PDDocument.load(originalArabicFile).use { original ->
+            PDDocument.load(repairedArabicFile).use { repaired ->
+                require(original.numberOfPages == repaired.numberOfPages) {
+                    "عدد صفحات نسختي الترجمة غير متساوٍ؛ لا يمكن تطبيق اختيارات الصفحات بأمان."
+                }
+                PDDocument().use { output ->
+                    for (index in 0 until original.numberOfPages) {
+                        val sourceDoc = if (index in approvedPages) repaired else original
+                        output.importPage(sourceDoc.getPage(index))
+                    }
+                    outputFile.parentFile?.mkdirs()
+                    output.save(outputFile)
+                }
+            }
+        }
+        require(outputFile.isFile && outputFile.length() > 0L) { "تعذر إنشاء نسخة الترجمة وفق اختيارات الصفحات." }
+        require(pageCount(outputFile) == pageCount(originalArabicFile)) { "فشل التحقق من عدد صفحات النسخة المختارة." }
+    }
+
     fun build(originalBytes: ByteArray, arabicBytes: ByteArray, arabicLeft: Boolean): ByteArray {
         PDDocument.load(ByteArrayInputStream(originalBytes)).use { original ->
             PDDocument.load(ByteArrayInputStream(arabicBytes)).use { arabic ->
