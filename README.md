@@ -1,48 +1,32 @@
-# SmartPDF Pairer — Android V1.1
+# SmartPDF Pairer — V1.3.0 Smart Merge
 
-تطبيق Android لاختيار ملف PDF أصلي وملف PDF عربي ثم إنشاء كتاب ثنائي اللغة جنبًا إلى جنب.
+Android application for creating side-by-side bilingual PDF files.
 
-## الوظائف الموجودة في V1
+## Main actions
 
-- اختيار ملفات PDF من الهاتف باستخدام Android Document Picker.
-- العربي يسارًا والأصلي يمينًا افتراضيًا.
-- إمكانية عكس ترتيب الملفين.
-- مطابقة صفحة 1 مع صفحة 1، وهكذا.
-- يشترط تساوي عدد الصفحات في هذا الإصدار.
+1. **Normal merge** — imports the selected original and translated PDFs side by side. This path calls only `PdfPairer`; it does not invoke OCR or translation and does not alter either source file.
+2. **Smart merge** — scans the translation-side PDF for English text that remains visible, prefers native PDF text extraction, and falls back to Tesseract OCR/hOCR when extraction is empty or corrupted (and on pages containing image XObjects). Clearly detected English-only regions are translated to Arabic and overlaid at their detected position when the background is sufficiently white and the replacement fits safely. The original files remain unchanged. The result is then paired with the original PDF and a separate UTF-8 report is offered.
+3. **OCR report** — retains the previous OCR text-report action as a separate utility.
 
-## إضافات V1.1
+## Smart merge safety rules
 
-- حفظ / تصدير الملف باستخدام `ACTION_CREATE_DOCUMENT`؛ يختار المستخدم Downloads أو أي مجلد يدعمه مزود الملفات.
-- فتح الملف الناتج باستخدام تطبيق PDF مثبت على الجهاز.
-- شريط تقدم محدد النسبة أثناء نسخ الملفات ودمج الصفحات والتصدير.
-- عرض عدد الصفحات وأحجام ملفات المصدر.
-- منع بدء عملية دمج ثانية أثناء انشغال التطبيق.
-- رسائل أوضح عند فشل القراءة أو الدمج أو الحفظ.
-- نقل ملفات المصدر إلى مساحة Cache والعمل باستخدام ملفات بدل قراءة الكتابين كاملين إلى `ByteArray`، لتقليل ضغط الذاكرة.
-- استخدام `FileProvider` لفتح ملف PDF المؤقت بأمان عند الحاجة.
+- Arabic text is not sent to the English-to-Arabic translator.
+- Existing Arabic content is preserved.
+- OCR regions without usable hOCR coordinates, low-confidence OCR, non-white/image backgrounds, or translations that do not fit are not overwritten; they are listed in the report for review.
+- Translation is attempted only for English-only text regions still present in the translation PDF.
+- A paragraph that is completely absent from the translation PDF cannot be reliably identified as missing by simple text extraction alone. The report states this limitation; this version does not claim semantic proof that every source paragraph has an Arabic counterpart.
+- The same-page mapping currently requires equal page counts. Different page counts stop the smart operation rather than guessing page correspondence.
+- Translation and first-time OCR/font model downloads require internet access. OCR models and the Arabic font are cached in app-private storage.
 
-## حدود الإصدار
+## Technical architecture
 
-- لا توجد مطابقة ذكية عند اختلاف عدد الصفحات؛ هذه ميزة V2.
-- لا يوجد OCR للملفات الممسوحة ضوئيًا؛ هذه ميزة V3.
-- شريط التقدم يعرض مراحل النسخ وعدد الصفحات التي انتهى دمجها، وليس تقديرًا زمنيًا.
-- قد تختلف قدرة فتح PDF حسب تطبيق قارئ PDF المثبت على الهاتف.
+- `PdfPairer.kt`: original, independent side-by-side PDF composition path.
+- `smart/SmartTranslationRepair.kt`: smart translation-side inspection, positioned PDF text extraction, OCR/hOCR fallback, conservative in-place overlay, and report generation.
+- `ocr/OcrReportGenerator.kt`: original standalone OCR report feature.
+- `MainActivity.kt`: separate normal and smart actions, progress, output save, and smart report save.
 
-## البناء
+## Build
 
-ارفع المشروع إلى GitHub ثم:
+GitHub Actions runs `testDebugUnitTest` and `assembleDebug` using JDK 17, Gradle 8.13, and Android SDK 36. The APK is uploaded only after the build job succeeds.
 
-`Actions → Android Build`
-
-وسيتم إنشاء `app-debug.apk` كـ Artifact.
-
-## التحقق
-
-تم تحديث المصدر إلى V1.1. لم يتم ادعاء نجاح بناء APK أو اختباره على جهاز Android في هذه الجلسة؛ يجب تشغيل GitHub Actions أولًا، ثم تثبيت APK واختبار التصدير والفتح وملف كبير نسبيًا.
-
-## خارطة الطريق
-
-- V1.2: تحسين المعاينة وتجربة الاستخدام.
-- V2: مطابقة ذكية لتسلسل الصفحات عند اختلاف عدد الصفحات.
-- V3: OCR للملفات المصورة.
-- V4: مراجعة أزواج الصفحات وتعديلها يدويًا وحفظ مشاريع المطابقة.
+No successful Android build or physical-device runtime test is claimed by this source package until GitHub Actions completes successfully and the generated APK is tested on a device.

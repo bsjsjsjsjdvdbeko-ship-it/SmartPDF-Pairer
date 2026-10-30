@@ -21,42 +21,42 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="أنشئ كتابًا ثنائي اللغة: العربي يسارًا والأصلي يمينًا."
+            android:text="اختر ملف PDF الأصلي وملف الترجمة، ثم اختر نوع المعالجة."
             android:textSize="16sp" />
 
         <TextView
             android:id="@+id/originalName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:text="Original PDF: لم يتم الاختيار"
+            android:layout_marginTop="24dp"
+            android:text="الملف الأصلي: لم يتم الاختيار"
             android:textSize="16sp" />
 
         <Button
             android:id="@+id/selectOriginal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="اختيار Original PDF" />
+            android:text="اختيار الملف الأصلي PDF" />
 
         <TextView
             android:id="@+id/arabicName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Arabic PDF: لم يتم الاختيار"
+            android:layout_marginTop="16dp"
+            android:text="ملف الترجمة: لم يتم الاختيار"
             android:textSize="16sp" />
 
         <Button
             android:id="@+id/selectArabic"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="اختيار Arabic PDF" />
+            android:text="اختيار ملف الترجمة PDF" />
 
         <TextView
             android:id="@+id/pageInfo"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="16dp"
             android:text="اختر الملفين أولاً."
             android:textSize="15sp" />
 
@@ -64,15 +64,13 @@
             android:id="@+id/layoutGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp">
-
+            android:layout_marginTop="10dp">
             <RadioButton
                 android:id="@+id/arabicLeft"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:checked="true"
                 android:text="العربي يسار ← الأصلي يمين" />
-
             <RadioButton
                 android:id="@+id/originalLeft"
                 android:layout_width="match_parent"
@@ -80,12 +78,49 @@
                 android:text="الأصلي يسار ← العربي يمين" />
         </RadioGroup>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="وظائف الدمج"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
         <Button
             android:id="@+id/pairButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="1. دمج عادي — دون تعديل الملفات" />
+
+        <Button
+            android:id="@+id/smartButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="2. الدمج الذكي — إكمال الترجمة الناقصة ثم الدمج" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="يفحص النص الإنجليزي المتبقي في ملف الترجمة، ويستخدم OCR عند تعذر استخراج النص، ويترجم المناطق القابلة للمعالجة في موضعها، ثم يصدر تقريرًا."
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="إنشاء وحفظ PDF" />
+            android:text="أدوات مستقلة"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/ocrButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="3. OCR واستخراج النصوص إلى تقرير" />
 
         <ProgressBar
             android:id="@+id/progress"

@@ -11,27 +11,13 @@ android {
         applicationId = "com.smartpdf.pairer"
         minSdk = 24
         targetSdk = 36
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
-        versionName = "1.1.0"
-    }
-
-    signingConfigs {
-        create("release") {
-            val ksPath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/keystore/release.keystore"
-            storeFile = file(ksPath)
-            storePassword = System.getenv("KEYSTORE_STORE_PASSWORD") ?: "dummy_pass"
-            keyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "smartpdf"
-            keyPassword = System.getenv("KEYSTORE_KEY_PASSWORD") ?: "dummy_pass"
-        }
+        versionCode = 3
+        versionName = "1.3.0"
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("release")
-        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -50,4 +36,5 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.google.android.material:material:1.13.0")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("com.rmtheis:tess-two:9.1.0")
 }

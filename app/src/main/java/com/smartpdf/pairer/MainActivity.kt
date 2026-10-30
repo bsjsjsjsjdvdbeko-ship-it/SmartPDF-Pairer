@@ -16,6 +16,8 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import com.smartpdf.pairer.ocr.OcrReportGenerator
+import com.smartpdf.pairer.smart.SmartTranslationRepair
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +30,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var saveButton: Button
     private lateinit var openButton: Button
     private lateinit var arabicLeft: RadioButton
+    private lateinit var ocrButton: Button
+    private lateinit var smartButton: Button
+    private var pendingOcrReport: String? = null
+    private var pendingSmartReport: String? = null
 
     private var originalUri: Uri? = null
     private var arabicUri: Uri? = null
@@ -43,6 +49,8 @@ class MainActivity : AppCompatActivity() {
         private const val PICK_ORIGINAL = 1001
         private const val PICK_ARABIC = 1002
         private const val CREATE_OUTPUT = 1003
+        private const val CREATE_OCR_REPORT = 1004
+        private const val CREATE_SMART_REPORT = 1005
         private const val OUTPUT_FILE_NAME = "Bilingual_Final.pdf"
     }
 
@@ -59,6 +67,8 @@ class MainActivity : AppCompatActivity() {
         saveButton = findViewById<Button>(R.id.saveButton)
         openButton = findViewById<Button>(R.id.openButton)
         arabicLeft = findViewById<RadioButton>(R.id.arabicLeft)
+        ocrButton = findViewById(R.id.ocrButton)
+        smartButton = findViewById(R.id.smartButton)
 
         findViewById<Button>(R.id.selectOriginal).setOnClickListener {
             openPdfPicker(PICK_ORIGINAL)
@@ -67,8 +77,10 @@ class MainActivity : AppCompatActivity() {
             openPdfPicker(PICK_ARABIC)
         }
         pairButton.setOnClickListener { startPairing() }
+        smartButton.setOnClickListener { startSmartPairing() }
         saveButton.setOnClickListener { launchSavePicker() }
         openButton.setOnClickListener { openGeneratedPdf() }
+        ocrButton.setOnClickListener { startOcrReport() }
 
         updateActionButtons()
     }
@@ -118,6 +130,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             CREATE_OUTPUT -> saveGeneratedPdf(uri)
+            CREATE_OCR_REPORT -> saveOcrReport(uri)
+            CREATE_SMART_REPORT -> saveSmartReport(uri)
         }
     }
 
@@ -146,14 +160,16 @@ class MainActivity : AppCompatActivity() {
                     status.text = if (originalPages == arabicPages) {
                         "✓ الملفان جاهزان للمطابقة صفحة مقابل صفحة."
                     } else {
-                        "⚠️ يختلف عدد الصفحات. إصدار V1.1 ما زال يتطلب تساوي العدد؛ المطابقة الذكية ضمن V2."
+                        "⚠️ يختلف عدد الصفحات. يلزم حاليًا تساوي عدد الصفحات للمطابقة صفحة مقابل صفحة."
                     }
                     pairButton.isEnabled = originalPages == arabicPages && !isBusy
+                    smartButton.isEnabled = originalPages == arabicPages && !isBusy
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "❌ تعذر فحص PDF: ${friendlyError(e)}"
                     pairButton.isEnabled = false
+                    smartButton.isEnabled = false
                 }
             }
         }
@@ -191,7 +207,7 @@ class MainActivity : AppCompatActivity() {
                 val originalPages = PdfPairer.pageCount(originalTemp)
                 val arabicPages = PdfPairer.pageCount(arabicTemp)
                 require(originalPages == arabicPages) {
-                    "عدد الصفحات مختلف: Original=$originalPages, Arabic=$arabicPages. لا يمكن دمجهما في V1.1."
+                    "عدد الصفحات مختلف: Original=$originalPages, Arabic=$arabicPages. لا يمكن دمجهما في الدمج العادي."
                 }
                 require(originalPages > 0) { "أحد الملفين لا يحتوي على صفحات." }
 
@@ -226,6 +242,156 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Smart path is intentionally separate; normal pairing never calls OCR or translation. */
+    private fun startSmartPairing() {
+        if (isBusy) return
+        val original = originalUri
+        val arabic = arabicUri
+        if (original == null || arabic == null) {
+            Toast.makeText(this, "اختر الملف الأصلي وملف الترجمة أولاً.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val placeArabicOnLeft = arabicLeft.isChecked
+        generatedFile = null
+        savedOutputUri = null
+        pendingSmartReport = null
+        updateActionButtons()
+        setBusy(true, 0, "بدء الفحص الذكي لملف الترجمة...")
+        executor.execute {
+            try {
+                val originalTemp = File(cacheDir, "smart_original.pdf")
+                val arabicTemp = File(cacheDir, "smart_arabic_source.pdf")
+                val repairedArabic = File(cacheDir, "smart_arabic_repaired.pdf")
+                val outputTemp = File(cacheDir, "Bilingual_Smart_Final.pdf")
+
+                copyUriToFile(original, originalTemp) { copied, total ->
+                    updateProgress(percent(copied, total) * 4 / 100, 100, "نسخ الملف الأصلي...")
+                }
+                copyUriToFile(arabic, arabicTemp) { copied, total ->
+                    updateProgress(4 + percent(copied, total) * 4 / 100, 100, "نسخ ملف الترجمة...")
+                }
+
+                val originalPages = PdfPairer.pageCount(originalTemp)
+                val translationPages = PdfPairer.pageCount(arabicTemp)
+                require(originalPages == translationPages) {
+                    "عدد الصفحات مختلف: الأصلي=$originalPages، الترجمة=$translationPages. لا يمكن إجراء المطابقة الآمنة صفحة بصفحة."
+                }
+
+                val repairResult = SmartTranslationRepair.repair(
+                    this,
+                    originalTemp,
+                    arabicTemp,
+                    repairedArabic
+                ) { completed, total, message ->
+                    updateProgress(8 + if (total == 0) 0 else completed * 52 / total, 100, message)
+                }
+                pendingSmartReport = repairResult.report
+
+                PdfPairer.build(
+                    originalTemp,
+                    repairedArabic,
+                    outputTemp,
+                    placeArabicOnLeft
+                ) { completed, total ->
+                    updateProgress(60 + completed * 38 / total, 100, "دمج الصفحات المحسّنة: $completed من $total")
+                }
+                require(outputTemp.isFile && outputTemp.length() > 0L) { "لم يتم إنشاء ملف الدمج الذكي." }
+                generatedFile = outputTemp
+                runOnUiThread {
+                    setBusy(false)
+                    progress.progress = 100
+                    status.text = "اكتمل الدمج الذكي. تمت معالجة ${repairResult.translatedRegions} منطقة، وتحتاج ${repairResult.reviewRegions} منطقة إلى مراجعة.
+سيتم حفظ PDF ثم عرض خيار حفظ التقرير."
+                    updateActionButtons()
+                    launchSavePicker()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    setBusy(false)
+                    status.text = "فشل الدمج الذكي: ${friendlyError(e)}"
+                    updateActionButtons()
+                }
+            }
+        }
+    }
+
+    private fun saveSmartReport(destination: Uri) {
+        val report = pendingSmartReport
+        if (report.isNullOrBlank()) {
+            status.text = "تقرير الدمج الذكي غير متاح."
+            return
+        }
+        try {
+            contentResolver.openOutputStream(destination, "wt").use { output ->
+                requireNotNull(output) { "تعذر فتح ملف التقرير." }
+                output.write(report.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            pendingSmartReport = null
+            status.text = "تم حفظ ملف الدمج الذكي وتقرير الفحص بنجاح. راجع التقرير لمعرفة المناطق التي تحتاج تدقيقًا."
+        } catch (e: Exception) {
+            status.text = "تعذر حفظ تقرير الدمج الذكي: ${friendlyError(e)}"
+        }
+    }
+
+    private fun startOcrReport() {
+        if (isBusy) return
+        val sourceUri = arabicUri
+        if (sourceUri == null) {
+            Toast.makeText(this, "اختر ملف PDF العربي أولاً.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        setBusy(true, 0, "جاري تجهيز OCR العربي والإنجليزي...")
+        ocrButton.isEnabled = false
+        executor.execute {
+            try {
+                val input = File(cacheDir, "ocr_source.pdf")
+                copyUriToFile(sourceUri, input)
+                val report = OcrReportGenerator.generate(this, input) { completed, total, message ->
+                    updateProgress(if (total == 0) 0 else completed * 100 / total, 100, message)
+                }
+                pendingOcrReport = report
+                runOnUiThread {
+                    setBusy(false)
+                    ocrButton.isEnabled = true
+                    status.text = "اكتمل OCR. اختر مكان حفظ تقرير النصوص والترجمات. لم يتم تغيير PDF الأصلي."
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TITLE, "SmartPDF_OCR_Arabic_English_Report.txt")
+                    }
+                    startActivityForResult(intent, CREATE_OCR_REPORT)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    setBusy(false)
+                    ocrButton.isEnabled = true
+                    status.text = "تعذر إكمال OCR: ${friendlyError(e)}"
+                }
+            }
+        }
+    }
+
+    private fun saveOcrReport(destination: Uri) {
+        val report = pendingOcrReport
+        if (report.isNullOrBlank()) {
+            status.text = "تقرير OCR غير متاح. أعد العملية."
+            return
+        }
+        try {
+            contentResolver.openOutputStream(destination, "wt").use { output ->
+                requireNotNull(output) { "تعذر فتح ملف التقرير للحفظ." }
+                output.write(report.toByteArray(Charsets.UTF_8))
+                output.flush()
+            }
+            pendingOcrReport = null
+            status.text = "تم حفظ تقرير OCR والترجمات بنجاح. ملف PDF الأصلي لم يتغير."
+        } catch (e: Exception) {
+            status.text = "فشل حفظ تقرير OCR: ${friendlyError(e)}"
+        }
+    }
+
     private fun launchSavePicker() {
         val file = generatedFile
         if (file == null || !file.exists()) {
@@ -235,7 +401,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "application/pdf"
-            putExtra(Intent.EXTRA_TITLE, OUTPUT_FILE_NAME)
+            putExtra(Intent.EXTRA_TITLE, if (pendingSmartReport != null) "Bilingual_Smart_Final.pdf" else OUTPUT_FILE_NAME)
         }
         startActivityForResult(intent, CREATE_OUTPUT)
     }
@@ -277,9 +443,21 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
-                    status.text = "✅ تم حفظ Bilingual_Final.pdf بنجاح.\nيمكنك فتح الملف الآن."
+                    status.text = if (pendingSmartReport != null) {
+                        "✅ تم حفظ ملف الدمج الذكي. اختر الآن مكان حفظ تقرير الفحص."
+                    } else {
+                        "✅ تم حفظ Bilingual_Final.pdf بنجاح.\nيمكنك فتح الملف الآن."
+                    }
                     updateActionButtons()
                     Toast.makeText(this, "تم حفظ ملف PDF بنجاح", Toast.LENGTH_LONG).show()
+                    if (pendingSmartReport != null) {
+                        val reportIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TITLE, "SmartPDF_Smart_Merge_Report.txt")
+                        }
+                        startActivityForResult(reportIntent, CREATE_SMART_REPORT)
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -365,7 +543,10 @@ class MainActivity : AppCompatActivity() {
         progress.isIndeterminate = false
         progress.max = 100
         progress.progress = initialProgress
+        ocrButton.isEnabled = !busy && arabicUri != null
         pairButton.isEnabled = !busy && originalUri != null && arabicUri != null
+        smartButton.isEnabled = !busy && originalUri != null && arabicUri != null &&
+            (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
         saveButton.isEnabled = !busy && generatedFile?.exists() == true
         openButton.isEnabled = !busy && (savedOutputUri != null || generatedFile?.exists() == true)
         if (message != null) status.text = message
@@ -374,7 +555,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateActionButtons() {
         saveButton.isEnabled = !isBusy && generatedFile?.exists() == true
         openButton.isEnabled = !isBusy && (savedOutputUri != null || generatedFile?.exists() == true)
+        ocrButton.isEnabled = !isBusy && arabicUri != null
         pairButton.isEnabled = !isBusy && originalUri != null && arabicUri != null &&
+            (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
+        smartButton.isEnabled = !isBusy && originalUri != null && arabicUri != null &&
             (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
     }
 
