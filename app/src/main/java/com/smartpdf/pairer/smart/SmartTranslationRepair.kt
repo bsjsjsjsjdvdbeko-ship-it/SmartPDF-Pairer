@@ -12,6 +12,9 @@ import android.text.TextPaint
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
+import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
+import com.tom_roush.pdfbox.util.Matrix
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -19,6 +22,7 @@ import com.tom_roush.pdfbox.text.TextPosition
 import org.json.JSONObject
 import java.io.File
 import java.io.ByteArrayOutputStream
+import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -38,7 +42,16 @@ object SmartTranslationRepair {
         val translatedRegions: Int,
         val reviewRegions: Int,
         val pagesProcessed: Int,
-        val modifiedPages: Set<Int>
+        val modifiedPages: Set<Int>,
+        val regionCandidates: List<RegionCandidate>
+    )
+
+    data class RegionCandidate(
+        val id: String,
+        val pageIndex: Int,
+        val sourceText: String,
+        val proposedText: String,
+        val confidence: Int
     )
 
     private data class TextRegion(
@@ -62,6 +75,7 @@ object SmartTranslationRepair {
         sourcePdf: File,
         translationPdf: File,
         outputPdf: File,
+        approvedRegionIds: Set<String>? = null,
         onProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): Result {
         require(sourcePdf.isFile && sourcePdf.length() > 0L) { "الملف الأصلي غير موجود أو فارغ." }
@@ -73,7 +87,10 @@ object SmartTranslationRepair {
         val translationCache = HashMap<String, String?>()
         var translatedCount = 0
         var reviewCount = 0
+        var arabicIntegrityIssueCount = 0
+        var rebuiltArabicTextLayerPages = 0
         val modifiedPages = linkedSetOf<Int>()
+        val regionCandidates = linkedMapOf<String, RegionCandidate>()
         val report = StringBuilder()
         report.append("SmartPDF Pairer — تقرير الدمج الذكي وتحسين الترجمة\n")
         report.append("الملف الأصلي: ${sourcePdf.name}\nملف الترجمة: ${translationPdf.name}\n")
@@ -98,6 +115,23 @@ object SmartTranslationRepair {
                     for (pageIndex in 0 until total) {
                         val sourceLines = nativeStripper.extract(sourceDoc, pageIndex)
                         val targetLines = nativeStripper.extract(translatedDoc, pageIndex)
+                        // Hidden V2.1 phase 1: audit extracted Arabic text for broken Unicode,
+                        // suspicious RTL ordering and bidi-control problems. Findings are
+                        // diagnostic only until visual/OCR confirmation is available.
+                        val sourceArabicAudit = ArabicTextIntegrityAuditor.audit(sourceLines.map { it.text })
+                        val arabicAudit = ArabicTextIntegrityAuditor.audit(targetLines.map { it.text })
+                        fun appendArabicAudit(sideLabel: String, audit: ArabicTextIntegrityAuditor.PageResult) {
+                            if (audit.findings.isEmpty()) return
+                            arabicIntegrityIssueCount += audit.findings.size
+                            report.append("[فحص سلامة العربية/RTL — $sideLabel — الصفحة ${pageIndex + 1}] ${audit.findings.size} ملاحظة.\n")
+                            audit.findings.forEach { finding ->
+                                report.append("  ${finding.severity}: ${finding.code} — ${finding.message}\n")
+                                report.append("  النص: ${finding.excerpt}\n")
+                                if (finding.severity != ArabicTextIntegrityAuditor.Severity.INFO) reviewCount++
+                            }
+                        }
+                        appendArabicAudit("الأصل", sourceArabicAudit)
+                        appendArabicAudit("الترجمة", arabicAudit)
                         val targetPage = translatedDoc.getPage(pageIndex)
                         val pageWidth = targetPage.mediaBox.width
                         val pageHeight = targetPage.mediaBox.height
@@ -139,7 +173,9 @@ object SmartTranslationRepair {
                         var sourceOcrBitmap: Bitmap? = null
                         var sourceOcrRegions = emptyList<TextRegion>()
                         var ocrRegions = emptyList<TextRegion>()
-                        if (targetPageHasCorruptText || hasImages || visualImageMismatch) {
+                        if (targetPageHasCorruptText || hasImages || visualImageMismatch ||
+                            arabicAudit.findings.any { it.severity != ArabicTextIntegrityAuditor.Severity.INFO } ||
+                            sourceArabicAudit.findings.any { it.severity != ArabicTextIntegrityAuditor.Severity.INFO }) {
                             try {
                                 if (!ocrInitializationAttempted) {
                                     ocrInitializationAttempted = true
@@ -168,6 +204,49 @@ object SmartTranslationRepair {
                                     }
                                     if (ocrRegions.isEmpty()) {
                                         report.append("الصفحة ${pageIndex + 1}: لم يوفر OCR إحداثيات hOCR موثوقة؛ لم يتم إدراج نص عشوائي.\n")
+                                    } else {
+                                        // V2.2 phase 2: compare the embedded Arabic text with the
+                                        // OCR reading. Only when the native layer is demonstrably
+                                        // damaged and OCR confidence is high do we rebuild this
+                                        // page as a visually preserved raster plus invisible,
+                                        // Unicode-mapped searchable text.
+                                        val nativeArabicText = targetLines.map { it.text }
+                                            .filter { arabic.containsMatchIn(it) }.joinToString(" ")
+                                        val ocrArabicText = ocrRegions.map { it.text }
+                                            .filter { arabic.containsMatchIn(it) }.joinToString(" ")
+                                        val confidenceLines = ocrRegions.filter { it.text.isNotBlank() }
+                                        val meanOcrConfidence = confidenceLines.map { it.confidence }.average().takeIf { !it.isNaN() } ?: 0.0
+                                        val nativeTokens = arabicTokens(nativeArabicText)
+                                        val ocrTokens = arabicTokens(ocrArabicText)
+                                        val overlap = if (nativeTokens.isEmpty() && ocrTokens.isEmpty()) 1f else
+                                            if (nativeTokens.isEmpty() || ocrTokens.isEmpty()) 0f else
+                                                nativeTokens.intersect(ocrTokens).size.toFloat() /
+                                                    nativeTokens.union(ocrTokens).size.toFloat()
+                                        val suspiciousArabicMapping = arabicAudit.findings.any {
+                                            it.code in setOf("UNMAPPED_GLYPH", "POSSIBLE_RTL_ORDER_CORRUPTION", "UNICODE_NORMALIZATION_CHANGE", "UNBALANCED_BIDI_CONTROLS")
+                                        }
+                                        val nativeArabicPresent = nativeArabicText.isNotBlank()
+                                        val ocrHasEnoughArabic = ocrTokens.size >= 3 && ocrArabicText.isNotBlank()
+                                        val extractionMismatch = !nativeArabicPresent || overlap < 0.42f
+                                        if ((suspiciousArabicMapping || extractionMismatch) &&
+                                            ocrHasEnoughArabic && meanOcrConfidence >= 82.0 &&
+                                            confidenceLines.count { it.confidence >= 75 } >= 1) {
+                                            val rebuilt = rebuildSearchablePage(
+                                                translatedDoc, pageIndex, ocrBitmap, ocrRegions,
+                                                pageWidth, pageHeight
+                                            )
+                                            if (rebuilt) {
+                                                rebuiltArabicTextLayerPages++
+                                                modifiedPages.add(pageIndex)
+                                                report.append("[تم إصلاح طبقة النص العربية] الصفحة ${pageIndex + 1}: OCR ثقة ${meanOcrConfidence.toInt()}%، تطابق الكلمات ${ (overlap * 100).toInt()}%. حُفظ المظهر كصورة صفحة وأضيفت طبقة نص Unicode غير مرئية قابلة للبحث والنسخ.\n")
+                                            } else {
+                                                reviewCount++
+                                                report.append("[تحتاج مراجعة] الصفحة ${pageIndex + 1}: اكتُشف اختلاف بين النص وOCR، لكن تعذر إنشاء طبقة نص موثوقة؛ لم يتم استبدال محتوى الصفحة.\n")
+                                            }
+                                        } else if (suspiciousArabicMapping || extractionMismatch) {
+                                            report.append("[لم يتم الإصلاح تلقائياً] الصفحة ${pageIndex + 1}: OCR غير كافٍ (الثقة ${meanOcrConfidence.toInt()}%، كلمات عربية ${ocrTokens.size})؛ حُفظت الصفحة دون تغيير.\n")
+                                            reviewCount++
+                                        }
                                     }
                                 }
                             } catch (e: Exception) {
@@ -275,12 +354,18 @@ object SmartTranslationRepair {
                                     val safeBox = backgroundBitmap?.let { pointsToBitmapBox(targetRegion, pageWidth, pageHeight, it) }
                                     val safeColor = if (backgroundBitmap != null && safeBox != null)
                                         sampleFlatBackgroundColor(backgroundBitmap, safeBox) else null
-                                    if (safeColor != null && drawReplacement(translatedDoc, pageIndex, targetRegion,
-                                            aiAudit.correctedArabic, pageWidth, pageHeight, safeColor)) {
+                                    if (safeColor != null) {
+                                        val candidate = makeCandidate(pageIndex, sourceRegion.text, aiAudit.correctedArabic,
+                                            targetRegion, (aiAudit.confidence * 100).toInt())
+                                        if (approvedRegionIds != null && candidate.id !in approvedRegionIds) continue
+                                        if (drawReplacement(translatedDoc, pageIndex, targetRegion,
+                                                aiAudit.correctedArabic, pageWidth, pageHeight, safeColor)) {
+                                        regionCandidates[candidate.id] = candidate
                                         translatedCount++
                                         modifiedPages.add(pageIndex)
                                         semanticRepaired.add(targetKey)
                                         report.append("[تم إصلاح الترجمة بتوصية AI عالية الثقة]\nEN: ${sourceRegion.text}\nAR: ${aiAudit.correctedArabic}\n")
+                                        }
                                     } else {
                                         reviewCount++
                                         report.append("[مراجعة بشرية] AI وجد نقصاً/خطأ، لكن موضع الاستبدال أو الخلفية غير آمنين.\nEN: ${sourceRegion.text}\nAR: ${targetRegion.text}\n")
@@ -314,15 +399,21 @@ object SmartTranslationRepair {
                             }
                             val safeColor = if (backgroundBitmap != null && safeBox != null)
                                 sampleFlatBackgroundColor(backgroundBitmap, safeBox) else null
-                            if (safeColor != null && drawReplacement(
-                                    translatedDoc, pageIndex, targetRegion, referenceArabic,
-                                    pageWidth, pageHeight, safeColor
-                                )) {
+                            if (safeColor != null) {
+                                val candidate = makeCandidate(pageIndex, sourceRegion.text, referenceArabic,
+                                    targetRegion, 90)
+                                if (approvedRegionIds != null && candidate.id !in approvedRegionIds) continue
+                                if (drawReplacement(
+                                        translatedDoc, pageIndex, targetRegion, referenceArabic,
+                                        pageWidth, pageHeight, safeColor
+                                    )) {
+                                regionCandidates[candidate.id] = candidate
                                 translatedCount++
                                 modifiedPages.add(pageIndex)
                                 semanticRepaired.add(targetKey)
                                 report.append("[إصلاح جودة محتمل] تشابه منخفض جداً مع ترجمة مرجعية (${(similarity * 100).toInt()}%)؛ استُبدلت المنطقة العربية المقابلة بحذر.\n")
                                 report.append("EN: ${sourceRegion.text}\nAR: $referenceArabic\n")
+                                }
                             } else {
                                 reviewCount++
                                 report.append("[مراجعة جودة] ترجمة عربية محتملة الضعف (تغطية مرجعية ${(similarity * 100).toInt()}%)، لكن لم يتم استبدالها لأن موضعها/خلفيتها غير آمنين أو لا تتسع للمحتوى.\nEN: ${sourceRegion.text}\nAR: ${targetRegion.text}\n")
@@ -388,6 +479,11 @@ object SmartTranslationRepair {
                                 continue
                             }
 
+                            val candidate = makeCandidate(pageIndex, rawText, translated, placement, region.confidence)
+                            if (approvedRegionIds != null && candidate.id !in approvedRegionIds) {
+                                ocrBackgroundPatch?.recycle()
+                                continue
+                            }
                             val success = drawReplacement(
                                 translatedDoc,
                                 pageIndex,
@@ -400,6 +496,7 @@ object SmartTranslationRepair {
                             )
                             ocrBackgroundPatch?.recycle()
                             if (success) {
+                                regionCandidates[candidate.id] = candidate
                                 translatedCount++
                                 modifiedPages.add(pageIndex)
                                 report.append("[تمت الترجمة والإضافة في الموضع نفسه]\nEN: $rawText\nAR: $translated\n")
@@ -446,13 +543,26 @@ object SmartTranslationRepair {
 
         report.append("\nملخص التنفيذ\n")
         report.append("الصفحات: ${PDDocument.load(outputPdf).use { it.numberOfPages }}\n")
+        report.append("الصفحات التي أُعيد بناء طبقة النص العربية فيها: $rebuiltArabicTextLayerPages\n")
+        report.append("المناطق المرشحة للمراجعة المستقلة: ${regionCandidates.size}\n")
         report.append("المناطق التي تمت ترجمتها وإضافتها: $translatedCount\n")
+        report.append("ملاحظات سلامة العربية واتجاه RTL في الأصل والترجمة: $arabicIntegrityIssueCount\n")
         report.append("المناطق التي تحتاج مراجعة أو تعذر تعديلها: $reviewCount\n")
         report.append("الصفحات التي تحتوي تعديلات آلية: ${modifiedPages.sorted().joinToString(", ") { (it + 1).toString() }.ifBlank { "لا توجد" }}\n")
         report.append("تنبيه: لا يعني عدم اكتشاف نص متبقٍ أن كل فقرة غائبة قد تمت ترجمتها؛ يجب مراجعة التقرير والصفحات.\n")
 
         return Result(outputPdf, report.toString(), translatedCount, reviewCount,
-            totalPages(outputPdf), modifiedPages.toSet())
+            totalPages(outputPdf), modifiedPages.toSet(), regionCandidates.values.toList())
+    }
+
+    private fun makeCandidate(pageIndex: Int, sourceText: String, proposedText: String,
+                              region: TextRegion, confidence: Int): RegionCandidate {
+        // Exclude translated wording so an online translator's minor wording variation
+        // cannot invalidate the user's approval when the approved repair is re-run.
+        val raw = "$pageIndex|${normalize(sourceText)}|${region.x.toInt()}|${region.baselineFromTop.toInt()}"
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(raw.toByteArray(Charsets.UTF_8)).take(12).joinToString("") { "%02x".format(it) }
+        return RegionCandidate(digest, pageIndex, sourceText, proposedText, confidence)
     }
 
     private fun totalPages(file: File): Int = PDDocument.load(file).use { it.numberOfPages }
@@ -642,6 +752,73 @@ object SmartTranslationRepair {
             false
         } finally {
             overlay?.recycle()
+        }
+    }
+
+    /**
+     * Rebuilds a damaged PDF text layer without changing the page's visible appearance:
+     * the original page is rendered to a lossless PNG and used as the page background,
+     * while OCR lines are written as invisible Unicode text using an embedded Arabic font.
+     * This is deliberately limited to pages whose OCR has already passed a strict confidence
+     * gate. If any font/glyph/API step fails, the caller keeps the original page untouched.
+     */
+    private fun rebuildSearchablePage(
+        document: PDDocument,
+        pageIndex: Int,
+        pageBitmap: Bitmap?,
+        ocrLines: List<TextRegion>,
+        pageWidth: Float,
+        pageHeight: Float
+    ): Boolean {
+        if (pageBitmap == null || pageBitmap.isRecycled || ocrLines.isEmpty()) return false
+        val fontFile = listOf(
+            "/system/fonts/NotoNaskhArabic-Regular.ttf",
+            "/system/fonts/NotoNaskhArabicUI-Regular.ttf",
+            "/system/fonts/NotoSansArabic-Regular.ttf",
+            "/system/fonts/NotoSansArabicUI-Regular.ttf"
+        ).map(::File).firstOrNull { it.isFile && it.canRead() } ?: return false
+        val usableLines = ocrLines.filter { it.text.isNotBlank() && it.confidence >= 75 }
+        if (usableLines.isEmpty()) return false
+
+        return try {
+            // Load and preflight all text before overwriting the original page content.
+            val font = FileInputStream(fontFile).use { PDType0Font.load(document, it) }
+            usableLines.forEach { line -> font.getStringWidth(line.text) }
+
+            val png = ByteArrayOutputStream().use { output ->
+                check(pageBitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                output.toByteArray()
+            }
+            val background = PDImageXObject.createFromByteArray(document, png, "OCR searchable page $pageIndex")
+            val page = document.getPage(pageIndex)
+            val crop = page.cropBox
+            val media = page.mediaBox
+            // Avoid coordinate ambiguity on rotated pages or pages with shifted crop boxes.
+            if (page.rotation != 0 || kotlin.math.abs(media.lowerLeftX) > 0.5f ||
+                kotlin.math.abs(media.lowerLeftY) > 0.5f ||
+                kotlin.math.abs(crop.lowerLeftX) > 0.5f ||
+                kotlin.math.abs(crop.lowerLeftY) > 0.5f ||
+                kotlin.math.abs(crop.width - media.width) > 0.5f ||
+                kotlin.math.abs(crop.height - media.height) > 0.5f) return false
+            PDPageContentStream(
+                document, page, PDPageContentStream.AppendMode.OVERWRITE, true, true
+            ).use { stream ->
+                stream.drawImage(background, 0f, 0f, pageWidth, pageHeight)
+                stream.beginText()
+                stream.setRenderingMode(RenderingMode.NEITHER)
+                usableLines.forEach { line ->
+                    val fontSize = (line.height * 0.78f).coerceIn(5f, 36f)
+                    val x = line.x.coerceIn(0f, (pageWidth - 1f).coerceAtLeast(0f))
+                    val y = (pageHeight - line.baselineFromTop).coerceIn(0f, (pageHeight - 1f).coerceAtLeast(0f))
+                    stream.setFont(font, fontSize)
+                    stream.setTextMatrix(Matrix.getTranslateInstance(x, y))
+                    stream.showText(line.text)
+                }
+                stream.endText()
+            }
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

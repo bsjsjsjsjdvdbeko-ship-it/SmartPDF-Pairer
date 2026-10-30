@@ -128,3 +128,21 @@ The advanced merge now pauses after repair and opens a page-by-page comparison o
 ## V1.9.0 — Page-level approval and selective repair
 
 Advanced merge now records exactly which pages received automated overlays. During review, each modified page has an approval checkbox. The final Arabic PDF is assembled by importing approved repaired pages and untouched original-translation pages for all rejected or unmodified pages. This prevents a user from having to accept or reject every repair as one batch. The existing conservative smooth-background patch estimator remains limited to locally smooth surfaces; complex photos/textures are not automatically inpainted. This is page-level approval, not per-OCR-box approval or a claim of generative AI inpainting. Normal merge remains unchanged. See `STAGE_V1.9.0_AR.md`.
+
+
+## V2.0.0 — Per-region approval
+
+Advanced merge now exposes each successfully rendered repair candidate separately in the review screen, with its source text, proposed Arabic wording, page number, and detection confidence. The user can approve or reject each region independently, including multiple different decisions on the same page. On confirmation, the repair engine re-runs against the untouched Arabic source and applies only approved region IDs; it no longer imports or accepts an entire repaired page. Candidate IDs are based on page, normalized source text, and region position (not remote translation wording) so small wording variations do not invalidate the approval. The ordinary merge path is unchanged. This remains conservative local overlay repair; it is not a general-purpose generative inpainting engine. See `STAGE_V2.0.0_AR.md`.
+
+
+## V2.1.0 — Hidden Arabic/RTL integrity audit (phase 1)
+
+The advanced merge path now runs a hidden Arabic text integrity audit on both source and translated PDF text extraction. It flags unmapped/private glyphs, Arabic presentation forms, suspicious or unbalanced bidirectional controls, and heuristic signs of reversed Arabic word order. Non-informational findings trigger the existing OCR review path. This first phase is diagnostic and conservative: it does not rewrite Arabic text based on a guess and adds no user-facing settings or technical controls.
+
+
+## V2.2.0 — Arabic searchable text-layer repair
+- Advanced merge compares native extracted Arabic with high-confidence Arabic+English OCR.
+- When a damaged text layer is confirmed, the affected page is rebuilt as a lossless rendered page image plus an invisible Unicode-mapped OCR text layer, so the visible page is retained while copy/search can use recognized text.
+- Rebuilding is gated by OCR confidence and Arabic token mismatch; low-confidence pages are left unchanged and flagged internally.
+- This targeted fallback rasterizes only rebuilt pages (180 DPI in the current OCR path), so vector sharpness/selectability of non-OCR objects on those pages is not preserved.
+- Ordinary merge remains unchanged; the advanced flow keeps the simple user-facing controls.

@@ -42,7 +42,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingSmartReport: String? = null
     private var pendingSmartOriginalFile: File? = null
     private var pendingSmartArabicOriginalFile: File? = null
-    private var pendingSmartArabicRepairedFile: File? = null
     private var pendingSmartPlaceArabicLeft: Boolean = true
 
     private var originalUri: Uri? = null
@@ -180,9 +179,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (requestCode == REVIEW_SMART_RESULT) {
-            val approvedPages = data?.getIntArrayExtra(PdfComparePreviewActivity.EXTRA_APPROVED_PAGES)
+            val approvedRegionIds = data?.getStringArrayListExtra(PdfComparePreviewActivity.EXTRA_APPROVED_REGION_IDS)
                 ?.toSet() ?: emptySet()
-            continueSmartPairing(approvedPages)
+            continueSmartPairing(approvedRegionIds)
             return
         }
         val uri = data?.data ?: return
@@ -371,14 +370,13 @@ class MainActivity : AppCompatActivity() {
                 pendingSmartReport = repairResult.report
                 pendingSmartOriginalFile = originalTemp
                 pendingSmartArabicOriginalFile = arabicTemp
-                pendingSmartArabicRepairedFile = repairedArabic
                 pendingSmartPlaceArabicLeft = placeArabicOnLeft
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
                     status.text = "اكتمل الفحص والإصلاح الأولي: ${repairResult.translatedRegions} منطقة عولجت، و${repairResult.reviewRegions} منطقة تحتاج مراجعة.\nراجع الصفحات قبل اعتماد أي تعديل."
                     updateActionButtons()
-                    openSmartReviewPreview(arabicTemp, repairedArabic, repairResult.modifiedPages)
+                    openSmartReviewPreview(arabicTemp, repairedArabic, repairResult.regionCandidates)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -390,7 +388,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openSmartReviewPreview(originalArabicFile: File, repairedArabicFile: File, modifiedPages: Set<Int>) {
+    private fun openSmartReviewPreview(originalArabicFile: File, repairedArabicFile: File,
+                                       candidates: List<SmartTranslationRepair.RegionCandidate>) {
         val before = FileProvider.getUriForFile(this, "$packageName.fileprovider", originalArabicFile)
         val after = FileProvider.getUriForFile(this, "$packageName.fileprovider", repairedArabicFile)
         startActivityForResult(Intent(this, PdfComparePreviewActivity::class.java).apply {
@@ -399,38 +398,49 @@ class MainActivity : AppCompatActivity() {
             putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_NAME, "الترجمة قبل التحسين")
             putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_NAME, "الترجمة بعد التحسين")
             putExtra(PdfComparePreviewActivity.EXTRA_REVIEW_MODE, true)
-            putExtra(PdfComparePreviewActivity.EXTRA_MODIFIED_PAGES, modifiedPages.toIntArray())
+            putStringArrayListExtra(PdfComparePreviewActivity.EXTRA_CANDIDATE_IDS, ArrayList(candidates.map { it.id }))
+            putStringArrayListExtra(PdfComparePreviewActivity.EXTRA_CANDIDATE_LABELS, ArrayList(candidates.map {
+                "EN: ${it.sourceText.take(100)}\nAR: ${it.proposedText.take(140)}\nثقة الكشف: ${it.confidence}%"
+            }))
+            putIntegerArrayListExtra(PdfComparePreviewActivity.EXTRA_CANDIDATE_PAGES, ArrayList(candidates.map { it.pageIndex }))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }, REVIEW_SMART_RESULT)
     }
 
-    /** User approval is required before the repaired translation is used in the final pair. */
-    private fun continueSmartPairing(approvedPages: Set<Int>) {
+    /** Re-run repair from the untouched Arabic source, applying only individually approved regions. */
+    private fun continueSmartPairing(approvedRegionIds: Set<String>) {
         val originalFile = pendingSmartOriginalFile
         val originalArabic = pendingSmartArabicOriginalFile
-        val repairedArabic = pendingSmartArabicRepairedFile
-        if (originalFile == null || originalArabic == null || repairedArabic == null) {
+        if (originalFile == null || originalArabic == null) {
             status.text = "ملفات المراجعة المؤقتة غير متاحة. أعد عملية الدمج المتقدم."
             return
         }
-        val selectedArabic = File(cacheDir, "smart_arabic_selected_pages.pdf")
+        val selectedArabic = File(cacheDir, "smart_arabic_selected_regions.pdf")
         val outputTemp = File(cacheDir, "Bilingual_Smart_Final.pdf")
-        setBusy(true, 60, if (approvedPages.isEmpty()) "لم تعتمد أي صفحة؛ سيتم استخدام الترجمة الأصلية بالكامل..." else "تطبيق اختياراتك صفحة بصفحة وإنشاء الملف النهائي...")
+        setBusy(true, 60, if (approvedRegionIds.isEmpty()) "لم تعتمد أي منطقة؛ سيتم استخدام الترجمة الأصلية بالكامل..." else "تطبيق المناطق التي وافقت عليها فقط...")
         executor.execute {
             try {
-                PdfPairer.buildSelectiveTranslation(originalArabic, repairedArabic, selectedArabic, approvedPages)
+                // Always run the hidden integrity pass: an empty approval set rejects visual
+                // translation replacements, but must not disable independent OCR text-layer repair.
+                SmartTranslationRepair.repair(
+                    this, originalFile, originalArabic, selectedArabic,
+                    approvedRegionIds = approvedRegionIds
+                ) { completed, total, message ->
+                    updateProgress(60 + if (total == 0) 0 else completed * 25 / total, 100,
+                        "فحص النصوص وتطبيق الإصلاحات المعتمدة: $completed من $total — $message")
+                }
                 PdfPairer.build(originalFile, selectedArabic, outputTemp, pendingSmartPlaceArabicLeft) { completed, total ->
-                    updateProgress(60 + completed * 38 / total, 100, "إنشاء الملف النهائي: $completed من $total")
+                    updateProgress(85 + if (total == 0) 0 else completed * 13 / total, 100, "إنشاء الملف النهائي: $completed من $total")
                 }
                 require(outputTemp.isFile && outputTemp.length() > 0L) { "لم يتم إنشاء ملف الدمج النهائي." }
                 generatedFile = outputTemp
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
-                    status.text = if (approvedPages.isEmpty()) {
-                        "لم تعتمد أي تحسين؛ تم استخدام ملف الترجمة الأصلي بالكامل. اختر مكان الحفظ."
+                    status.text = if (approvedRegionIds.isEmpty()) {
+                        "اكتمل فحص سلامة النصوص دون اعتماد استبدالات مرئية. اختر مكان الحفظ."
                     } else {
-                        "تم اعتماد تحسينات ${approvedPages.size} صفحة فقط، وبقية الصفحات من الترجمة الأصلية. اختر مكان الحفظ."
+                        "تم اعتماد ${approvedRegionIds.size} منطقة نصية، واكتمل فحص سلامة النصوص. اختر مكان الحفظ."
                     }
                     updateActionButtons()
                     launchSavePicker()
@@ -438,7 +448,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     setBusy(false)
-                    status.text = "تعذر إنشاء الدمج بعد المراجعة: ${friendlyError(e)}"
+                    status.text = "تعذر إنشاء الدمج بعد مراجعة المناطق: ${friendlyError(e)}"
                     updateActionButtons()
                 }
             }

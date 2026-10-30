@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.LinearLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -28,8 +29,10 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         const val EXTRA_ARABIC_NAME = "arabic_name"
         const val EXTRA_REVIEW_MODE = "review_mode"
         const val EXTRA_ACCEPTED = "review_accepted"
-        const val EXTRA_MODIFIED_PAGES = "modified_pages"
-        const val EXTRA_APPROVED_PAGES = "approved_pages"
+        const val EXTRA_CANDIDATE_IDS = "candidate_ids"
+        const val EXTRA_CANDIDATE_LABELS = "candidate_labels"
+        const val EXTRA_CANDIDATE_PAGES = "candidate_pages"
+        const val EXTRA_APPROVED_REGION_IDS = "approved_region_ids"
     }
 
     private lateinit var originalImage: ImageView
@@ -38,9 +41,11 @@ class PdfComparePreviewActivity : AppCompatActivity() {
     private lateinit var loading: ProgressBar
     private lateinit var previous: Button
     private lateinit var next: Button
-    private lateinit var approveCurrentPage: CheckBox
-    private val modifiedPages = linkedSetOf<Int>()
-    private val approvedPages = linkedSetOf<Int>()
+    private val candidateIds = arrayListOf<String>()
+    private val candidateLabels = arrayListOf<String>()
+    private val candidatePages = arrayListOf<Int>()
+    private val approvedRegionIds = linkedSetOf<String>()
+    private lateinit var regionChoiceContainer: LinearLayout
     private val worker = Executors.newSingleThreadExecutor()
     private var originalRenderer: PdfRenderer? = null
     private var arabicRenderer: PdfRenderer? = null
@@ -60,29 +65,26 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         loading = findViewById(R.id.previewLoading)
         previous = findViewById(R.id.previousPage)
         next = findViewById(R.id.nextPage)
-        approveCurrentPage = findViewById(R.id.approveCurrentPage)
-        intent.getIntArrayExtra(EXTRA_MODIFIED_PAGES)?.forEach { modifiedPages.add(it) }
-        approvedPages.addAll(modifiedPages)
-        approveCurrentPage.setOnCheckedChangeListener { _, checked ->
-            if (pageIndex in modifiedPages) {
-                if (checked) approvedPages.add(pageIndex) else approvedPages.remove(pageIndex)
-            }
-        }
+        regionChoiceContainer = findViewById(R.id.regionChoiceContainer)
+        intent.getStringArrayListExtra(EXTRA_CANDIDATE_IDS)?.let { candidateIds.addAll(it) }
+        intent.getStringArrayListExtra(EXTRA_CANDIDATE_LABELS)?.let { candidateLabels.addAll(it) }
+        intent.getIntegerArrayListExtra(EXTRA_CANDIDATE_PAGES)?.let { candidatePages.addAll(it) }
+        approvedRegionIds.addAll(candidateIds)
         val reviewMode = intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)
         val reviewActions = findViewById<View>(R.id.reviewActions)
         reviewActions.visibility = if (reviewMode) View.VISIBLE else View.GONE
         if (reviewMode) {
             findViewById<Button>(R.id.acceptChanges).setOnClickListener {
                 setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCEPTED, true)
-                    .putExtra(EXTRA_APPROVED_PAGES, approvedPages.toIntArray()))
+                    .putStringArrayListExtra(EXTRA_APPROVED_REGION_IDS, ArrayList(approvedRegionIds)))
                 finish()
             }
             findViewById<Button>(R.id.rejectChanges).setOnClickListener {
                 setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCEPTED, false)
-                    .putExtra(EXTRA_APPROVED_PAGES, intArrayOf()))
+                    .putStringArrayListExtra(EXTRA_APPROVED_REGION_IDS, arrayListOf()))
                 finish()
             }
-            pageLabel.text = "حدد الصفحات التي توافق على تحسيناتها؛ الصفحات غير المحددة ستبقى من ملف الترجمة الأصلي."
+            pageLabel.text = "حدد كل منطقة نصية تريد اعتمادها؛ يمكنك قبول منطقة ورفض أخرى في الصفحة نفسها."
         }
         findViewById<TextView>(R.id.originalPreviewTitle).text =
             intent.getStringExtra(EXTRA_ORIGINAL_NAME) ?: "Original PDF"
@@ -142,14 +144,25 @@ class PdfComparePreviewActivity : AppCompatActivity() {
     private fun showPage(index: Int) {
         if (index !in 0 until totalPages) return
         pageIndex = index
-        approveCurrentPage.isEnabled = index in modifiedPages
-        approveCurrentPage.visibility = if (intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)) View.VISIBLE else View.GONE
-        approveCurrentPage.setOnCheckedChangeListener(null)
-        approveCurrentPage.isChecked = index in approvedPages
-        approveCurrentPage.text = if (index in modifiedPages) "اعتماد تحسينات الصفحة ${index + 1}" else "لا توجد تعديلات آلية في هذه الصفحة"
-        approveCurrentPage.setOnCheckedChangeListener { _, checked ->
-            if (pageIndex in modifiedPages) {
-                if (checked) approvedPages.add(pageIndex) else approvedPages.remove(pageIndex)
+        regionChoiceContainer.removeAllViews()
+        if (intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)) {
+            val pageCandidateIndices = candidatePages.indices.filter { candidatePages[it] == pageIndex }
+            if (pageCandidateIndices.isEmpty()) {
+                val empty = TextView(this).apply { text = "لا توجد مناطق إصلاح آمنة قابلة للاعتماد في هذه الصفحة."; setPadding(8, 8, 8, 8) }
+                regionChoiceContainer.addView(empty)
+            } else {
+                pageCandidateIndices.forEach { candidateIndex ->
+                    val id = candidateIds.getOrNull(candidateIndex) ?: return@forEach
+                    val label = candidateLabels.getOrNull(candidateIndex) ?: "منطقة نصية"
+                    val check = CheckBox(this).apply {
+                        text = label
+                        isChecked = id in approvedRegionIds
+                        setOnCheckedChangeListener { _, checked ->
+                            if (checked) approvedRegionIds.add(id) else approvedRegionIds.remove(id)
+                        }
+                    }
+                    regionChoiceContainer.addView(check)
+                }
             }
         }
         loading.visibility = View.VISIBLE
