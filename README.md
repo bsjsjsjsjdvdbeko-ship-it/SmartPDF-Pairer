@@ -30,3 +30,13 @@ Android application for creating side-by-side bilingual PDF files.
 GitHub Actions runs `testDebugUnitTest` and `assembleDebug` using JDK 17, Gradle 8.13, and Android SDK 36. The APK is uploaded only after the build job succeeds.
 
 No successful Android build or physical-device runtime test is claimed by this source package until GitHub Actions completes successfully and the generated APK is tested on a device.
+
+
+## V1.3.2 — Smart Merge restoration
+
+- Restores the separate Smart Merge and OCR report actions.
+- Keeps the PDFBox `LayerUtility` page composition path and the original vector page content.
+- Arabic replacement glyphs are shaped by Android Canvas and embedded as a small lossless PNG overlay only for the replacement region; the rest of each PDF page is not rasterized. Text in that replacement overlay is not selectable/searchable.
+- OCR uses `tess-two` with Arabic and English trained data.
+- The GitHub Actions workflow uses the runner-provided Android SDK and signs debug/release with the configured GitHub Secrets keystore.
+- Smart Merge is conservative: it replaces only detected English-only regions on sufficiently light backgrounds and sends uncertain cases to the report. It cannot infer paragraphs completely absent from the translation PDF.

@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 36
         // Keep updates installable even if early GitHub run numbers are below V1.3's code.
-        versionCode = maxOf(4, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 4)
-        versionName = "1.3.0"
+        versionCode = maxOf(17, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 17)
+        versionName = "1.3.2"
     }
 
     signingConfigs {
@@ -28,11 +28,11 @@ android {
 
     buildTypes {
         debug {
-            // signing disabled for test
+            signingConfig = signingConfigs.getByName("release")
         }
         release {
             isMinifyEnabled = false
-            // signing disabled for test
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
