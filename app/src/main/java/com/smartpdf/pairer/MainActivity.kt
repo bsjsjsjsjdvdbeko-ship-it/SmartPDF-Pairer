@@ -301,8 +301,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
-                    status.text = "اكتمل الدمج الذكي. تمت معالجة ${repairResult.translatedRegions} منطقة، وتحتاج ${repairResult.reviewRegions} منطقة إلى مراجعة.
-سيتم حفظ PDF ثم عرض خيار حفظ التقرير."
+                    status.text = "اكتمل الدمج الذكي. تمت معالجة ${repairResult.translatedRegions} منطقة، وتحتاج ${repairResult.reviewRegions} منطقة إلى مراجعة.\n" +
+                        "سيتم حفظ PDF ثم عرض خيار حفظ التقرير."
                     updateActionButtons()
                     launchSavePicker()
                 }
