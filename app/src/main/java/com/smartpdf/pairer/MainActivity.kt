@@ -38,13 +38,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        originalName = findViewById(R.id.originalName)
-        arabicName = findViewById(R.id.arabicName)
-        pageInfo = findViewById(R.id.pageInfo)
-        status = findViewById(R.id.status)
-        progress = findViewById(R.id.progress)
-        pairButton = findViewById(R.id.pairButton)
-        arabicLeft = findViewById(R.id.arabicLeft)
+        originalName = findViewById<TextView>(R.id.originalName)
+        arabicName = findViewById<TextView>(R.id.arabicName)
+        pageInfo = findViewById<TextView>(R.id.pageInfo)
+        status = findViewById<TextView>(R.id.status)
+        progress = findViewById<ProgressBar>(R.id.progress)
+        pairButton = findViewById<Button>(R.id.pairButton)
+        arabicLeft = findViewById<RadioButton>(R.id.arabicLeft)
 
         findViewById<Button>(R.id.selectOriginal).setOnClickListener {
             openPdfPicker(PICK_ORIGINAL)

@@ -65,7 +65,7 @@ object PdfPairer {
                         draw(cs, arabicForm, aw, ah, 0.0, slotW, slotH)
                         draw(cs, originalForm, ow, oh, slotW, slotW, slotH)
                     } else {
-                        draw(cs, originalForm, ow, oh, 0.0, slotW, slotW, slotH)
+                        draw(cs, originalForm, ow, oh, 0.0, slotW, slotH)
                         draw(cs, arabicForm, aw, ah, slotW, slotW, slotH)
                     }
                 }
