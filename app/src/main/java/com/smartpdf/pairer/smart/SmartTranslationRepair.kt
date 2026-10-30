@@ -1,5 +1,5 @@
-import android.text.TextPaint
 package com.smartpdf.pairer.smart
+import android.text.TextPaint
 
 import android.content.Context
 import android.graphics.Bitmap
