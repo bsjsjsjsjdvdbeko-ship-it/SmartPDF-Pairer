@@ -17,6 +17,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
@@ -68,6 +70,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Keep the branded footer clear of Android's gesture/navigation area on edge-to-edge devices.
+        val homeScroll = findViewById<ScrollView>(R.id.homeScroll)
+        val baseLeft = homeScroll.paddingLeft
+        val baseTop = homeScroll.paddingTop
+        val baseRight = homeScroll.paddingRight
+        val baseBottom = homeScroll.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(homeScroll) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(baseLeft, baseTop + bars.top, baseRight, baseBottom + bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(homeScroll)
 
         originalName = findViewById<TextView>(R.id.originalName)
         arabicName = findViewById<TextView>(R.id.arabicName)

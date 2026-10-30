@@ -12,8 +12,8 @@ android {
         minSdk = 24
         targetSdk = 36
         // Keep updates installable even if early GitHub run numbers are below V1.3's code.
-        versionCode = maxOf(31, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 31)
-        versionName = "2.3.1"
+        versionCode = maxOf(32, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 32)
+        versionName = "2.3.2"
     }
 
     signingConfigs {

@@ -158,3 +158,8 @@ The advanced merge path now runs a hidden Arabic text integrity audit on both so
 ## V2.3.1 — Ben Rawah reference-matched home screen
 
 The home screen now follows the approved Arabic visual reference: blue brand header, prominent combined PDF selection flow, side-by-side normal/smart merge cards, green trust banner, and Mohammed footer. Secondary tools remain accessible from settings.
+
+
+## V2.3.2
+
+واجهة رئيسية أنظف بعلامات PDF أقل، ورسم موحد للملفين، ومعالجة هوامش أشرطة النظام لمنع تغطية تذييل Mohammed.
