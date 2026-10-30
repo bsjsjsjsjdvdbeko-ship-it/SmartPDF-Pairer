@@ -1,173 +1,146 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#F4F6FF" android:fillViewport="true" android:clipToPadding="false">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:layoutDirection="rtl" android:paddingBottom="0dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        <!-- Hero header: settings on the right, brand in the center, app mark on the left. -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="250dp"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="18dp"
+            android:paddingBottom="30dp" android:background="@drawable/bg_home_header">
+            <ImageButton android:id="@+id/settingsButton" android:layout_width="48dp" android:layout_height="48dp"
+                android:layout_gravity="top" android:background="@drawable/bg_settings_button"
+                android:src="@android:drawable/ic_menu_preferences" android:tint="#FFFFFF"
+                android:contentDescription="الإعدادات" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical" android:gravity="start"
+                android:paddingStart="14dp" android:paddingEnd="8dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="بن راوح" android:textColor="#FFFFFF" android:textSize="34sp" android:textStyle="bold" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="SmartPDF Pairer" android:textColor="#E4ECFF" android:textSize="19sp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp" android:text="دمج ملفات PDF بذكاء وسهولة"
+                    android:textColor="#D9E5FF" android:textSize="15sp" />
+                <View android:layout_width="115dp" android:layout_height="4dp"
+                    android:layout_marginTop="13dp" android:background="#FFC928" />
+            </LinearLayout>
+            <ImageView android:layout_width="112dp" android:layout_height="112dp"
+                android:src="@mipmap/ic_launcher" android:contentDescription="شعار بن راوح"
+                android:background="@drawable/bg_settings_button" android:padding="5dp" />
+        </LinearLayout>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="SmartPDF Pairer"
-            android:textSize="28sp"
-            android:textStyle="bold" />
+        <!-- One obvious file-selection action; the two document pickers open in sequence. -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="18dp" android:layout_marginEnd="18dp" android:layout_marginTop="12dp"
+            android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="20dp"
+            android:paddingBottom="20dp" android:orientation="vertical" android:gravity="center"
+            android:background="@drawable/bg_file_panel">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="📄   ➕   📄" android:textSize="46sp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:gravity="center" android:text="اختر ملفات PDF"
+                android:textColor="#102653" android:textSize="27sp" android:textStyle="bold" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="3dp" android:gravity="center" android:text="الملف الأصلي والملف المترجم"
+                android:textColor="#657493" android:textSize="16sp" />
+            <Button android:id="@+id/selectFiles" android:layout_width="match_parent" android:layout_height="62dp"
+                android:layout_marginTop="18dp" android:text="📁   اختيار الملفات" android:textSize="19sp"
+                android:textStyle="bold" android:textAllCaps="false" android:textColor="#FFFFFF"
+                android:background="@drawable/bg_select_files" />
+            <TextView android:id="@+id/originalName" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:text="الملف الأصلي: لم يتم الاختيار"
+                android:textColor="#52617F" android:textSize="12sp" android:maxLines="1" android:ellipsize="middle" />
+            <TextView android:id="@+id/arabicName" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" android:text="ملف الترجمة: لم يتم الاختيار"
+                android:textColor="#52617F" android:textSize="12sp" android:maxLines="1" android:ellipsize="middle" />
+            <TextView android:id="@+id/pageInfo" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:text="اختر الملفين للبدء" android:textColor="#667493" android:textSize="12sp" />
+        </LinearLayout>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="اختر ملف PDF الأصلي وملف الترجمة، ثم اختر نوع المعالجة."
-            android:textSize="16sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="18dp" android:layout_marginEnd="18dp" android:layout_marginTop="22dp"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="اختر طريقة الدمج" android:textColor="#102653" android:textSize="20sp" android:textStyle="bold" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginStart="18dp" android:layout_marginEnd="18dp"
+            android:layout_marginTop="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="190dp" android:layout_weight="1"
+                android:layout_marginEnd="6dp" android:padding="13dp" android:gravity="center"
+                android:orientation="vertical" android:background="@drawable/bg_normal_card">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🚀"
+                    android:textSize="43sp" />
+                <Button android:id="@+id/pairButton" android:layout_width="match_parent" android:layout_height="48dp"
+                    android:layout_marginTop="5dp" android:text="دمج عادي" android:textAllCaps="false"
+                    android:textStyle="bold" android:textSize="17sp" android:textColor="#124A9E" android:backgroundTint="#DCEAFF" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center" android:text="دمج سريع وبسيط" android:textColor="#647493" android:textSize="13sp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="190dp" android:layout_weight="1"
+                android:layout_marginStart="6dp" android:padding="13dp" android:gravity="center"
+                android:orientation="vertical" android:background="@drawable/bg_smart_card">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🪄"
+                    android:textSize="43sp" />
+                <Button android:id="@+id/smartButton" android:layout_width="match_parent" android:layout_height="48dp"
+                    android:layout_marginTop="5dp" android:text="دمج ذكي" android:textAllCaps="false"
+                    android:textStyle="bold" android:textSize="17sp" android:textColor="#5632A5" android:backgroundTint="#EEE6FF" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center" android:text="فحص وتحسين الترجمة" android:textColor="#647493" android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
 
-        <TextView
-            android:id="@+id/originalName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="الملف الأصلي: لم يتم الاختيار"
-            android:textSize="16sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="18dp" android:layout_marginEnd="18dp" android:layout_marginTop="18dp"
+            android:padding="16dp" android:gravity="center_vertical" android:orientation="horizontal"
+            android:background="@drawable/bg_trust_banner">
+            <TextView android:layout_width="54dp" android:layout_height="wrap_content" android:text="🛡️"
+                android:textSize="39sp" android:gravity="center" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:orientation="vertical" android:paddingStart="12dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="تجربة آمنة وسريعة" android:textColor="#08734F" android:textSize="19sp" android:textStyle="bold" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="مع الحفاظ على جودة ملفاتك قدر الإمكان" android:textColor="#54766C" android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
 
-        <Button
-            android:id="@+id/selectOriginal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="اختيار الملف الأصلي PDF" />
+        <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent" android:layout_height="9dp" android:layout_marginStart="22dp"
+            android:layout_marginEnd="22dp" android:layout_marginTop="17dp" android:max="100"
+            android:progress="0" android:visibility="gone" />
+        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="22dp" android:layout_marginEnd="22dp" android:layout_marginTop="10dp"
+            android:textColor="#263B65" android:textSize="14sp" />
+        <Button android:id="@+id/saveButton" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="22dp" android:layout_marginEnd="22dp" android:layout_marginTop="12dp"
+            android:enabled="false" android:text="حفظ / تصدير PDF" android:textAllCaps="false" />
+        <Button android:id="@+id/openButton" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="22dp" android:layout_marginEnd="22dp" android:enabled="false"
+            android:text="فتح PDF الناتج" android:textAllCaps="false" />
 
-        <TextView
-            android:id="@+id/arabicName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="ملف الترجمة: لم يتم الاختيار"
-            android:textSize="16sp" />
-
-        <Button
-            android:id="@+id/selectArabic"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="اختيار ملف الترجمة PDF" />
-
-        <TextView
-            android:id="@+id/pageInfo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="اختر الملفين أولاً."
-            android:textSize="15sp" />
-
-        <Button
-            android:id="@+id/previewButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:enabled="false"
-            android:text="معاينة ومقارنة الصفحات" />
-
-        <RadioGroup
-            android:id="@+id/layoutGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp">
-            <RadioButton
-                android:id="@+id/arabicLeft"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="العربي يسار ← الأصلي يمين" />
-            <RadioButton
-                android:id="@+id/originalLeft"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="الأصلي يسار ← العربي يمين" />
+        <!-- Legacy workflow controls remain in the view tree but are not exposed on Home. -->
+        <Button android:id="@+id/selectOriginal" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:text="الملف الأصلي" />
+        <Button android:id="@+id/selectArabic" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:text="ملف الترجمة" />
+        <RadioGroup android:id="@+id/layoutGroup" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone">
+            <RadioButton android:id="@+id/arabicLeft" android:layout_width="wrap_content" android:layout_height="wrap_content" android:checked="true" android:text="العربي يسار" />
+            <RadioButton android:id="@+id/originalLeft" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="الأصلي يسار" />
         </RadioGroup>
+        <Button android:id="@+id/previewButton" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:enabled="false" android:text="معاينة" />
+        <Button android:id="@+id/ocrButton" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:enabled="false" android:text="OCR" />
+        <Button android:id="@+id/aiSettingsButton" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" android:text="AI" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="وظائف الدمج"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/pairButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="1. إنشاء ملف مدمج طبيعي" />
-
-        <Button
-            android:id="@+id/smartButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="2. دمج متقدم — مقارنة وإصلاح الترجمة والصور ثم الدمج" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="يقارن كل صفحة ويبحث عن الإنجليزية المتبقية والنص المختلط. يفحص النص داخل الصور والرسومات عند إعداد نموذج Vision. بعد المعالجة ستراجع النسخة المحسّنة صفحة بصفحة وتختار اعتماد التحسينات أو رفضها قبل إنشاء الملف النهائي."
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/aiSettingsButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="إعدادات تدقيق الترجمة والصور بالذكاء الاصطناعي" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="أدوات مستقلة"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/ocrButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="3. OCR واستخراج النصوص إلى تقرير" />
-
-        <ProgressBar
-            android:id="@+id/progress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="10dp"
-            android:layout_marginTop="16dp"
-            android:max="100"
-            android:progress="0"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textSize="15sp" />
-
-        <Button
-            android:id="@+id/saveButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:enabled="false"
-            android:text="حفظ / تصدير PDF" />
-
-        <Button
-            android:id="@+id/openButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="فتح PDF الناتج" />
-
+        <LinearLayout android:layout_width="match_parent" android:layout_height="76dp"
+            android:layout_marginTop="20dp" android:gravity="center" android:orientation="horizontal"
+            android:background="@drawable/bg_home_header">
+            <View android:layout_width="48dp" android:layout_height="1dp" android:background="#8FADEB" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="15dp" android:layout_marginEnd="15dp" android:text="Mohammed"
+                android:textColor="#FFFFFF" android:textSize="19sp" />
+            <View android:layout_width="48dp" android:layout_height="1dp" android:background="#8FADEB" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

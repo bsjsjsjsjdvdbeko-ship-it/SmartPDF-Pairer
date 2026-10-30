@@ -146,3 +146,15 @@ The advanced merge path now runs a hidden Arabic text integrity audit on both so
 - Rebuilding is gated by OCR confidence and Arabic token mismatch; low-confidence pages are left unchanged and flagged internally.
 - This targeted fallback rasterizes only rebuilt pages (180 DPI in the current OCR path), so vector sharpness/selectability of non-OCR objects on those pages is not preserved.
 - Ordinary merge remains unchanged; the advanced flow keeps the simple user-facing controls.
+
+## V2.3.0 — بن راوح Home UI
+- Redesigned the Arabic RTL home screen with a branded blue header and the existing app launcher icon.
+- Consolidated the two PDF pickers into one visual selection panel.
+- Kept only Normal Merge and Smart Merge as prominent home actions.
+- Moved page ordering, AI audit settings, OCR report, and optional comparison preview into the settings menu.
+- Preserved the existing processing flows and output actions.
+
+
+## V2.3.1 — Ben Rawah reference-matched home screen
+
+The home screen now follows the approved Arabic visual reference: blue brand header, prominent combined PDF selection flow, side-by-side normal/smart merge cards, green trust banner, and Mohammed footer. Secondary tools remain accessible from settings.

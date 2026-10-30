@@ -6,6 +6,7 @@
         <item name="colorSecondary">@color/smartpdf_purple</item>
         <item name="android:navigationBarColor">@color/smartpdf_navy</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#061D62</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

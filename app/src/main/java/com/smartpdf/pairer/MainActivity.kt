@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private var generatedFile: File? = null
     private var savedOutputUri: Uri? = null
     private var isBusy = false
+    private var selectingPairFiles = false
     private var pageCountOriginal: Int? = null
     private var pageCountArabic: Int? = null
 
@@ -82,7 +83,12 @@ class MainActivity : AppCompatActivity() {
         previewButton = findViewById(R.id.previewButton)
         previewButton.setOnClickListener { openComparisonPreview() }
 
+        findViewById<Button>(R.id.selectFiles).setOnClickListener {
+            selectingPairFiles = true
+            openPdfPicker(PICK_ORIGINAL)
+        }
         findViewById<Button>(R.id.selectOriginal).setOnClickListener {
+            selectingPairFiles = false
             openPdfPicker(PICK_ORIGINAL)
         }
         findViewById<Button>(R.id.selectArabic).setOnClickListener {
@@ -93,9 +99,42 @@ class MainActivity : AppCompatActivity() {
         saveButton.setOnClickListener { launchSavePicker() }
         openButton.setOnClickListener { openGeneratedPdf() }
         ocrButton.setOnClickListener { startOcrReport() }
+        findViewById<android.widget.ImageButton>(R.id.settingsButton).setOnClickListener { showHomeSettings() }
         findViewById<Button>(R.id.aiSettingsButton).setOnClickListener { showAiAuditSettings() }
 
         updateActionButtons()
+    }
+
+    private fun showHomeSettings() {
+        val items = arrayOf(
+            "اتجاه ترتيب الصفحات",
+            "إعدادات فحص الذكاء الاصطناعي",
+            "تقرير استخراج النصوص (OCR)",
+            "معاينة ومقارنة الملفين"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("إعدادات وأدوات إضافية")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> {
+                        val choices = arrayOf("الترجمة يسار — الأصلي يمين", "الأصلي يسار — الترجمة يمين")
+                        AlertDialog.Builder(this)
+                            .setTitle("ترتيب الصفحات في الملف النهائي")
+                            .setSingleChoiceItems(choices, if (arabicLeft.isChecked) 0 else 1) { dialog, selected ->
+                                arabicLeft.isChecked = selected == 0
+                                findViewById<RadioButton>(R.id.originalLeft).isChecked = selected == 1
+                                dialog.dismiss()
+                            }
+                            .setNegativeButton("إلغاء", null)
+                            .show()
+                    }
+                    1 -> showAiAuditSettings()
+                    2 -> startOcrReport()
+                    3 -> openComparisonPreview()
+                }
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
     }
 
     private fun showAiAuditSettings() {
@@ -169,6 +208,7 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != Activity.RESULT_OK) {
+            if (requestCode == PICK_ORIGINAL || requestCode == PICK_ARABIC) selectingPairFiles = false
             if (requestCode == REVIEW_SMART_RESULT) {
                 status.text = "تم إلغاء المراجعة. لم يتم اعتماد التحسينات ولم يُنشأ ملف الدمج النهائي. يمكنك إعادة الدمج المتقدم للمراجعة من جديد."
                 return
@@ -199,12 +239,17 @@ class MainActivity : AppCompatActivity() {
                 savedOutputUri = null
                 if (requestCode == PICK_ORIGINAL) {
                     originalUri = uri
-                    originalName.text = "Original PDF: ${displayName(uri)}"
+                    originalName.text = "الملف الأصلي: ${displayName(uri)}"
                     pageCountOriginal = null
+                    if (selectingPairFiles) {
+                        // Continue the single visible selection flow with the translated PDF.
+                        openPdfPicker(PICK_ARABIC)
+                    }
                 } else {
                     arabicUri = uri
-                    arabicName.text = "Arabic PDF: ${displayName(uri)}"
+                    arabicName.text = "ملف الترجمة: ${displayName(uri)}"
                     pageCountArabic = null
+                    selectingPairFiles = false
                 }
                 updateActionButtons()
                 updatePageInfo()
@@ -236,8 +281,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     pageCountOriginal = originalPages
                     pageCountArabic = arabicPages
-                    pageInfo.text = "Original: $originalPages صفحة (${formatSize(originalTemp.length())})\n" +
-                        "Arabic: $arabicPages صفحة (${formatSize(arabicTemp.length())})"
+                    pageInfo.text = "الأصلي: $originalPages صفحة (${formatSize(originalTemp.length())})\n" +
+                        "الترجمة: $arabicPages صفحة (${formatSize(arabicTemp.length())})"
                     status.text = if (originalPages == arabicPages) {
                         "✓ الملفان جاهزان للمطابقة صفحة مقابل صفحة."
                     } else {
