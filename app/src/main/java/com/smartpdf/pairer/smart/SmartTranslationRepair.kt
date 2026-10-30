@@ -1,3 +1,4 @@
+import android.text.TextPaint
 package com.smartpdf.pairer.smart
 
 import android.content.Context
