@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="smartpdf_navy">#10172A</color>
+    <color name="smartpdf_surface">#19233B</color>
+    <color name="smartpdf_purple">#7657D5</color>
+    <color name="smartpdf_on_navy">#F5F3FF</color>
+</resources>

@@ -60,6 +60,14 @@
             android:text="اختر الملفين أولاً."
             android:textSize="15sp" />
 
+        <Button
+            android:id="@+id/previewButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:enabled="false"
+            android:text="معاينة ومقارنة الصفحات" />
+
         <RadioGroup
             android:id="@+id/layoutGroup"
             android:layout_width="match_parent"
@@ -91,20 +99,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="1. دمج عادي — دون تعديل الملفات" />
+            android:text="1. إنشاء ملف مدمج طبيعي" />
 
         <Button
             android:id="@+id/smartButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="2. الدمج الذكي — إكمال الترجمة الناقصة ثم الدمج" />
+            android:text="2. دمج متقدم — مقارنة وإصلاح الترجمة والصور ثم الدمج" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="يفحص النص الإنجليزي المتبقي في ملف الترجمة، ويستخدم OCR عند تعذر استخراج النص، ويترجم المناطق القابلة للمعالجة في موضعها، ثم يصدر تقريرًا."
+            android:text="يقارن كل صفحة، ويبحث عن الإنجليزية المتبقية والنص المختلط، ويفحص الصور عبر OCR. يستبدل المناطق الآمنة فقط، ويسجل النواقص والمواضع غير الآمنة في تقرير للمراجعة."
             android:textSize="12sp" />
 
         <TextView

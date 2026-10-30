@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp">
+    <TextView android:id="@+id/previewPageLabel" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:text="مقارنة الصفحات"
+        android:textStyle="bold" android:textSize="16sp" android:padding="8dp" />
+    <ProgressBar android:id="@+id/previewLoading" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:layout_gravity="center_horizontal" />
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
+            android:orientation="horizontal" android:gravity="top" android:padding="4dp">
+            <LinearLayout android:layout_width="340dp" android:layout_height="match_parent"
+                android:orientation="vertical" android:padding="6dp">
+                <TextView android:id="@+id/originalPreviewTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="Original PDF" android:textStyle="bold"
+                    android:maxLines="2" android:padding="6dp" />
+                <ImageView android:id="@+id/originalPreview" android:layout_width="match_parent"
+                    android:layout_height="0dp" android:layout_weight="1" android:adjustViewBounds="true"
+                    android:scaleType="fitCenter" android:contentDescription="معاينة الصفحة الأصلية" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="340dp" android:layout_height="match_parent"
+                android:orientation="vertical" android:padding="6dp">
+                <TextView android:id="@+id/arabicPreviewTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="Arabic PDF" android:textStyle="bold"
+                    android:maxLines="2" android:padding="6dp" />
+                <ImageView android:id="@+id/arabicPreview" android:layout_width="match_parent"
+                    android:layout_height="0dp" android:layout_weight="1" android:adjustViewBounds="true"
+                    android:scaleType="fitCenter" android:contentDescription="معاينة صفحة الترجمة" />
+            </LinearLayout>
+        </LinearLayout>
+    </HorizontalScrollView>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center" android:paddingTop="8dp">
+        <Button android:id="@+id/previousPage" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:text="السابق" />
+        <Button android:id="@+id/nextPage" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:text="التالي" />
+    </LinearLayout>
+</LinearLayout>

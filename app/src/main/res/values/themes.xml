@@ -2,6 +2,10 @@
 <resources>
     <style name="Theme.SmartPDFPairer" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
+        <item name="colorPrimary">@color/smartpdf_purple</item>
+        <item name="colorSecondary">@color/smartpdf_purple</item>
+        <item name="android:navigationBarColor">@color/smartpdf_navy</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

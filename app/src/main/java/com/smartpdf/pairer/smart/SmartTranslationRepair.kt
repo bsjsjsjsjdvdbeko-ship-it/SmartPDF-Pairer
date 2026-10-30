@@ -1,5 +1,4 @@
 package com.smartpdf.pairer.smart
-import android.text.TextPaint
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -9,6 +8,7 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextDirectionHeuristics
+import android.text.TextPaint
 import com.googlecode.tesseract.android.TessBaseAPI
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
@@ -67,6 +67,9 @@ object SmartTranslationRepair {
         require(translationPdf.isFile && translationPdf.length() > 0L) { "ملف الترجمة غير موجود أو فارغ." }
 
         var tesseract: TessBaseAPI? = null
+        var ocrInitializationAttempted = false
+        var ocrInitializationError: String? = null
+        val translationCache = HashMap<String, String?>()
         var translatedCount = 0
         var reviewCount = 0
         val report = StringBuilder()
@@ -96,19 +99,41 @@ object SmartTranslationRepair {
                         val pageHeight = targetPage.mediaBox.height
                         val targetPageHasCorruptText = isExtractionCorrupt(targetLines)
                         val hasImages = pageHasImageXObjects(targetPage)
+                        val sourceEnglishCount = sourceLines.count { isEnglishOnly(it.text) }
+                        val targetArabicCount = targetLines.count { arabic.containsMatchIn(it.text) }
+                        report.append("\nالصفحة ${pageIndex + 1}: الأصل يحتوي $sourceEnglishCount منطقة/سطرًا إنجليزيًا قابلاً للاستخراج، وملف الترجمة يحتوي $targetArabicCount منطقة/سطرًا عربياً قابلاً للاستخراج.")
+                        if (sourceEnglishCount > 0 && targetArabicCount == 0) {
+                            report.append(" [تنبيه قوي: لم يُستخرج نص عربي من صفحة الترجمة؛ يلزم فحص OCR/مراجعة الصفحة]")
+                            reviewCount++
+                        } else if (sourceEnglishCount >= 4 && targetArabicCount < (sourceEnglishCount / 3)) {
+                            report.append(" [تنبيه تغطية محتمل: عدد المناطق العربية أقل بكثير من مناطق الأصل؛ هذا مؤشر تقريبي وليس حكماً على جودة الترجمة]")
+                            reviewCount++
+                        }
+                        report.append('\n')
 
                         var ocrBitmap: Bitmap? = null
                         var ocrRegions = emptyList<TextRegion>()
                         if (targetPageHasCorruptText || hasImages) {
                             try {
-                                if (tesseract == null) tesseract = createOcrIfNeeded(context)
-                                val dpi = 180f
-                                ocrBitmap = targetRenderer.renderImageWithDPI(pageIndex, dpi)
-                                tesseract?.setImage(ocrBitmap)
-                                val hocr = tesseract?.let { invokeHocr(it) }.orEmpty()
-                                ocrRegions = parseHocr(hocr, dpi)
-                                if (ocrRegions.isEmpty()) {
-                                    report.append("الصفحة ${pageIndex + 1}: تعذر تهيئة OCR أو لم تتوفر إحداثيات hOCR موثوقة؛ لم يتم إدراج نص عشوائي.\n")
+                                if (!ocrInitializationAttempted) {
+                                    ocrInitializationAttempted = true
+                                    try {
+                                        tesseract = createOcrIfNeeded(context)
+                                    } catch (e: Exception) {
+                                        ocrInitializationError = e.message ?: e.javaClass.simpleName
+                                    }
+                                }
+                                if (tesseract == null) {
+                                    report.append("الصفحة ${pageIndex + 1}: OCR غير متاح: ${ocrInitializationError ?: "تعذر تهيئة المحرك"}.\n")
+                                } else {
+                                    val dpi = 180f
+                                    ocrBitmap = targetRenderer.renderImageWithDPI(pageIndex, dpi)
+                                    tesseract?.setImage(ocrBitmap)
+                                    val hocr = tesseract?.let { invokeHocr(it) }.orEmpty()
+                                    ocrRegions = parseHocr(hocr, dpi)
+                                    if (ocrRegions.isEmpty()) {
+                                        report.append("الصفحة ${pageIndex + 1}: لم يوفر OCR إحداثيات hOCR موثوقة؛ لم يتم إدراج نص عشوائي.\n")
+                                    }
                                 }
                             } catch (e: Exception) {
                                 report.append("الصفحة ${pageIndex + 1}: تعذر OCR: ${e.message ?: e.javaClass.simpleName}\n")
@@ -123,7 +148,6 @@ object SmartTranslationRepair {
                         val candidates = if (targetPageHasCorruptText) imageCandidates else nativeCandidates + imageCandidates
 
                         if (candidates.isEmpty()) {
-                            val sourceEnglishCount = sourceLines.count { isEnglishOnly(it.text) }
                             report.append("الصفحة ${pageIndex + 1}: لم يُكتشف نص إنجليزي متبقٍ قابل للاستبدال")
                             if (sourceEnglishCount > 0) report.append(" (الأصل يحتوي $sourceEnglishCount سطرًا إنجليزيًا قابلًا للاستخراج)")
                             report.append(".\n")
@@ -142,7 +166,12 @@ object SmartTranslationRepair {
 
                         for (region in candidates) {
                             val rawText = region.text.trim()
-                            val translated = translate(rawText)
+                            val cacheKey = normalize(rawText)
+                            val translated = if (translationCache.containsKey(cacheKey)) {
+                                translationCache[cacheKey]
+                            } else {
+                                translate(rawText).also { translationCache[cacheKey] = it }
+                            }
                             if (translated.isNullOrBlank()) {
                                 reviewCount++
                                 report.append("[مراجعة] تعذرت الترجمة: $rawText\n")
@@ -206,8 +235,26 @@ object SmartTranslationRepair {
                         tesseract?.clear()
                     }
 
-                    outputPdf.parentFile?.mkdirs()
-                    translatedDoc.save(outputPdf)
+                    val outputParent = outputPdf.absoluteFile.parentFile
+                    check(outputParent == null || outputParent.exists() || outputParent.mkdirs()) {
+                        "تعذر إنشاء مجلد ملف PDF الناتج."
+                    }
+                    val temporaryOutput = File(outputParent, outputPdf.name + ".partial")
+                    if (temporaryOutput.exists()) temporaryOutput.delete()
+                    try {
+                        translatedDoc.save(temporaryOutput)
+                        check(temporaryOutput.isFile && temporaryOutput.length() > 0L) {
+                            "لم يتم حفظ ملف PDF المحسّن بصورة صحيحة."
+                        }
+                        if (outputPdf.exists() && !outputPdf.delete()) {
+                            error("تعذر استبدال ملف PDF الناتج السابق.")
+                        }
+                        check(temporaryOutput.renameTo(outputPdf)) {
+                            "تعذر اعتماد ملف PDF الناتج بعد الحفظ."
+                        }
+                    } finally {
+                        if (temporaryOutput.exists()) temporaryOutput.delete()
+                    }
                 }
             }
         } finally {
@@ -244,6 +291,34 @@ object SmartTranslationRepair {
             val baseline = textPositions.map { it.yDirAdj }.average().toFloat()
             val height = textPositions.maxOf { it.heightDir }
             pageLines.add(TextRegion(text.trim(), minX, baseline, maxX - minX, height))
+
+            // Mixed Arabic/English lines were previously skipped as a whole. Extract
+            // independently positioned Latin runs so an English fragment can be handled
+            // without painting over the neighboring Arabic text.
+            if (arabic.containsMatchIn(text) && textPositions.any { latinWord.containsMatchIn(it.unicode.orEmpty()) }) {
+                var run = ArrayList<TextPosition>()
+                fun flushRun() {
+                    if (run.isEmpty()) return
+                    val runText = run.joinToString("") { it.unicode.orEmpty() }.trim()
+                    if (runText.length >= 4 && latinWord.containsMatchIn(runText) && !arabic.containsMatchIn(runText)) {
+                        val left = run.minOf { it.xDirAdj }
+                        val right = run.maxOf { it.xDirAdj + it.widthDirAdj }
+                        val runBaseline = run.map { it.yDirAdj }.average().toFloat()
+                        val runHeight = run.maxOf { it.heightDir }
+                        pageLines.add(TextRegion(runText, left, runBaseline, right - left, runHeight))
+                    }
+                    run = ArrayList()
+                }
+                for (position in textPositions) {
+                    val glyph = position.unicode.orEmpty()
+                    if (glyph.isNotEmpty() && glyph.any { it in 'A'..'Z' || it in 'a'..'z' || it.isWhitespace() || it in ".,:;!?()[]{}-_/" }) {
+                        run.add(position)
+                    } else {
+                        flushRun()
+                    }
+                }
+                flushRun()
+            }
         }
     }
 
@@ -305,14 +380,14 @@ object SmartTranslationRepair {
             canvas.drawColor(android.graphics.Color.WHITE)
 
             if (translated.contains('\n') || translated.contains('\r')) return false
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
                 color = android.graphics.Color.rgb(20, 20, 20)
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
                 textSize = (min(11f, max(7.5f, originalHeight * 0.92f)) * scale)
             }
             val layoutWidth = (bitmapWidth - scale * 3).coerceAtLeast(8)
             var textLayout = StaticLayout.Builder.obtain(
-                translated, 0, translated.length, TextPaint(paint), layoutWidth
+                translated, 0, translated.length, paint, layoutWidth
             ).setTextDirection(TextDirectionHeuristics.RTL)
                 .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
                 .setIncludePad(false)
@@ -321,7 +396,7 @@ object SmartTranslationRepair {
             while ((textLayout.lineCount > 1 || textLayout.getLineWidth(0) > layoutWidth) && paint.textSize > 7.5f * scale) {
                 paint.textSize -= 0.5f * scale
                 textLayout = StaticLayout.Builder.obtain(
-                    translated, 0, translated.length, TextPaint(paint), layoutWidth
+                    translated, 0, translated.length, paint, layoutWidth
                 ).setTextDirection(TextDirectionHeuristics.RTL)
                     .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
                     .setIncludePad(false)
@@ -356,18 +431,85 @@ object SmartTranslationRepair {
         }
     }
 
-    private fun createOcrIfNeeded(context: Context): TessBaseAPI? {
+    /** Downloads a Tesseract language model once, using a temporary file so an interrupted
+     * download can never be mistaken for a complete traineddata file on the next launch.
+     */
+    private fun ensureRemoteFile(destination: File, remoteUrl: String) {
+        // Traineddata files are multi-megabyte binary assets. A tiny HTML error page or
+        // interrupted response must never be accepted as a valid cached language model.
+        if (destination.isFile && destination.length() >= 1_000_000L) return
+        if (destination.exists() && !destination.delete()) {
+            error("تعذر حذف ملف OCR غير مكتمل: ${destination.name}")
+        }
+
+        destination.parentFile?.let { parent ->
+            check(parent.exists() || parent.mkdirs()) { "تعذر إنشاء مجلد ملفات OCR: ${parent.absolutePath}" }
+        }
+        val temporary = File(destination.parentFile, destination.name + ".download")
+        if (temporary.exists()) temporary.delete()
+
+        val connection = (URL(remoteUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20000
+            readTimeout = 60000
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "SmartPDFPairer/1.3.3")
+        }
+        try {
+            val status = connection.responseCode
+            check(status == HttpURLConnection.HTTP_OK) {
+                "تعذر تنزيل ملف OCR (${destination.name}): HTTP $status"
+            }
+            val expectedLength = connection.contentLengthLong
+            check(expectedLength <= 0L || expectedLength <= 80L * 1024L * 1024L) {
+                "حجم ملف OCR غير متوقع: ${destination.name}"
+            }
+            var downloaded = 0L
+            connection.inputStream.use { input ->
+                temporary.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        downloaded += count
+                        check(downloaded <= 80L * 1024L * 1024L) {
+                            "تجاوز تنزيل OCR الحد المسموح: ${destination.name}"
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            check(temporary.isFile && temporary.length() >= 1_000_000L) {
+                "ملف OCR الذي تم تنزيله صغير أو غير مكتمل: ${destination.name}"
+            }
+            check(expectedLength <= 0L || downloaded == expectedLength) {
+                "انقطع تنزيل ملف OCR قبل اكتماله: ${destination.name}"
+            }
+            if (destination.exists() && !destination.delete()) {
+                error("تعذر استبدال ملف OCR القديم: ${destination.name}")
+            }
+            check(temporary.renameTo(destination)) {
+                "تعذر حفظ ملف OCR بعد تنزيله: ${destination.name}"
+            }
+        } finally {
+            connection.disconnect()
+            if (temporary.exists()) temporary.delete()
+        }
+    }
+
+    private fun createOcrIfNeeded(context: Context): TessBaseAPI {
         val root = File(context.filesDir, "tesseract")
         val data = File(root, "tessdata")
-        if (!data.exists()) data.mkdirs()
-        try {
-            ensureRemoteFile(File(data, "eng.traineddata"), MODEL_BASE + "eng.traineddata")
-            ensureRemoteFile(File(data, "ara.traineddata"), MODEL_BASE + "ara.traineddata")
-            return TessBaseAPI().also { api ->
-                check(api.init(root.absolutePath, "ara+eng")) { "تعذر تهيئة OCR." }
-                api.setVariable("preserve_interword_spaces", "1")
+        check(data.exists() || data.mkdirs()) { "تعذر إنشاء مجلد بيانات OCR." }
+        ensureRemoteFile(File(data, "eng.traineddata"), MODEL_BASE + "eng.traineddata")
+        ensureRemoteFile(File(data, "ara.traineddata"), MODEL_BASE + "ara.traineddata")
+        return TessBaseAPI().also { api ->
+            if (!api.init(root.absolutePath, "ara+eng")) {
+                api.end()
+                error("فشل Tesseract في تهيئة اللغتين العربية والإنجليزية. تحقق من ملفات traineddata.")
             }
-        } catch (_: Exception) { return null }
+            api.setVariable("preserve_interword_spaces", "1")
+        }
     }
 
     private fun invokeHocr(api: TessBaseAPI): String {
@@ -471,27 +613,4 @@ object SmartTranslationRepair {
         } catch (_: Exception) { null }
         finally { connection.disconnect() }
     }
-
-    private fun ensureRemoteFile(destination: File, url: String) {
-        if (destination.isFile && destination.length() > 100_000L) return
-        val temp = File(destination.parentFile, destination.name + ".part")
-        val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
-            connectTimeout = 20000
-            readTimeout = 90000
-            requestMethod = "GET"
-        }
-        try {
-            check(connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
-                "تعذر تنزيل الملف: HTTP ${connection.responseCode}"
-            }
-            connection.inputStream.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
-            check(temp.length() > 100_000L) { "الملف المنزّل غير مكتمل." }
-            if (destination.exists()) destination.delete()
-            check(temp.renameTo(destination)) { "تعذر حفظ الملف المنزّل." }
-        } finally {
-            connection.disconnect()
-            if (temp.exists()) temp.delete()
-        }
-    }
-
 }

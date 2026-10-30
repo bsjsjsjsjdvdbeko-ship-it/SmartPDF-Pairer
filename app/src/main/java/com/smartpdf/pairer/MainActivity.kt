@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var arabicLeft: RadioButton
     private lateinit var ocrButton: Button
     private lateinit var smartButton: Button
+    private lateinit var previewButton: Button
     private var pendingOcrReport: String? = null
     private var pendingSmartReport: String? = null
 
@@ -69,6 +70,8 @@ class MainActivity : AppCompatActivity() {
         arabicLeft = findViewById<RadioButton>(R.id.arabicLeft)
         ocrButton = findViewById(R.id.ocrButton)
         smartButton = findViewById(R.id.smartButton)
+        previewButton = findViewById(R.id.previewButton)
+        previewButton.setOnClickListener { openComparisonPreview() }
 
         findViewById<Button>(R.id.selectOriginal).setOnClickListener {
             openPdfPicker(PICK_ORIGINAL)
@@ -83,6 +86,21 @@ class MainActivity : AppCompatActivity() {
         ocrButton.setOnClickListener { startOcrReport() }
 
         updateActionButtons()
+    }
+
+    private fun openComparisonPreview() {
+        val original = originalUri
+        val arabic = arabicUri
+        if (original == null || arabic == null) {
+            Toast.makeText(this, "اختر الملفين أولاً.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivity(Intent(this, PdfComparePreviewActivity::class.java).apply {
+            putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_URI, original.toString())
+            putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_URI, arabic.toString())
+            putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_NAME, displayName(original))
+            putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_NAME, displayName(arabic))
+        })
     }
 
     private fun openPdfPicker(requestCode: Int) {
@@ -544,6 +562,7 @@ class MainActivity : AppCompatActivity() {
         progress.max = 100
         progress.progress = initialProgress
         ocrButton.isEnabled = !busy && arabicUri != null
+        previewButton.isEnabled = !busy && originalUri != null && arabicUri != null
         pairButton.isEnabled = !busy && originalUri != null && arabicUri != null
         smartButton.isEnabled = !busy && originalUri != null && arabicUri != null &&
             (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
@@ -556,6 +575,7 @@ class MainActivity : AppCompatActivity() {
         saveButton.isEnabled = !isBusy && generatedFile?.exists() == true
         openButton.isEnabled = !isBusy && (savedOutputUri != null || generatedFile?.exists() == true)
         ocrButton.isEnabled = !isBusy && arabicUri != null
+        previewButton.isEnabled = !isBusy && originalUri != null && arabicUri != null
         pairButton.isEnabled = !isBusy && originalUri != null && arabicUri != null &&
             (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
         smartButton.isEnabled = !isBusy && originalUri != null && arabicUri != null &&
