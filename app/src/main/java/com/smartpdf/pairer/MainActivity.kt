@@ -67,8 +67,8 @@ class MainActivity : AppCompatActivity() {
         saveButton = findViewById<Button>(R.id.saveButton)
         openButton = findViewById<Button>(R.id.openButton)
         arabicLeft = findViewById<RadioButton>(R.id.arabicLeft)
-        ocrButton = findViewById(R.id.ocrButton)
-        smartButton = findViewById(R.id.smartButton)
+        ocrButton = findViewById<Button>(R.id.ocrButton)
+        smartButton = findViewById<Button>(R.id.smartButton)
 
         findViewById<Button>(R.id.selectOriginal).setOnClickListener {
             openPdfPicker(PICK_ORIGINAL)

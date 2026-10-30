@@ -1,17 +1,16 @@
 package com.smartpdf.pairer
 
-import com.tom_roush.pdfbox.multipdf.LayerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
-import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.util.Matrix
 import java.io.File
 import java.io.InputStream
 
 /**
  * PDF pairing operations. File-based APIs avoid loading complete books into ByteArrays.
+ * Uses standard PDFBox importPage method, avoiding LayerUtility (not available in pdfbox-android).
  */
 object PdfPairer {
 
@@ -21,10 +20,6 @@ object PdfPairer {
     fun pageCount(file: File): Int =
         PDDocument.load(file).use { it.numberOfPages }
 
-    /**
-     * Creates a side-by-side PDF directly on disk.
-     * onProgress receives completed pages and total pages.
-     */
     fun build(
         originalFile: File,
         arabicFile: File,
@@ -47,8 +42,6 @@ object PdfPairer {
                 require(original.numberOfPages > 0) { "ملفات PDF لا تحتوي على صفحات." }
 
                 PDDocument().use { output ->
-                    val originalLayer = LayerUtility(output)
-                    val arabicLayer = LayerUtility(output)
                     val total = original.numberOfPages
 
                     for (i in 0 until total) {
@@ -67,8 +60,9 @@ object PdfPairer {
                         )
                         output.addPage(outputPage)
 
-                        val arabicForm = arabicLayer.importPageAsForm(arabic, i)
-                        val originalForm = originalLayer.importPageAsForm(original, i)
+                        // استيراد الصفحات ككائنات XObject (الطريقة المتوافقة مع أندرويد)
+                        val arabicForm = output.importPage(arabicPage)
+                        val originalForm = output.importPage(originalPage)
 
                         PDPageContentStream(
                             output,
@@ -97,7 +91,7 @@ object PdfPairer {
 
     private fun draw(
         stream: PDPageContentStream,
-        form: PDFormXObject,
+        form: com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject,
         sourceWidth: Double,
         sourceHeight: Double,
         x0: Double,
