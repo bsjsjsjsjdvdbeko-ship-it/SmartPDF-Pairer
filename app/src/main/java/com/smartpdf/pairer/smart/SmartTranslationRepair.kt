@@ -470,4 +470,27 @@ object SmartTranslationRepair {
         } catch (_: Exception) { null }
         finally { connection.disconnect() }
     }
+
+    private fun ensureRemoteFile(destination: File, url: String) {
+        if (destination.isFile && destination.length() > 100_000L) return
+        val temp = File(destination.parentFile, destination.name + ".part")
+        val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 20000
+            readTimeout = 90000
+            requestMethod = "GET"
+        }
+        try {
+            check(connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                "تعذر تنزيل الملف: HTTP ${connection.responseCode}"
+            }
+            connection.inputStream.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+            check(temp.length() > 100_000L) { "الملف المنزّل غير مكتمل." }
+            if (destination.exists()) destination.delete()
+            check(temp.renameTo(destination)) { "تعذر حفظ الملف المنزّل." }
+        } finally {
+            connection.disconnect()
+            if (temp.exists()) temp.delete()
+        }
+    }
+
 }
