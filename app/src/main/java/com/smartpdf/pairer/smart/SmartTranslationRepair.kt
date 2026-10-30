@@ -311,7 +311,7 @@ object SmartTranslationRepair {
             }
             val layoutWidth = (bitmapWidth - scale * 3).coerceAtLeast(8)
             var textLayout = StaticLayout.Builder.obtain(
-                translated, 0, translated.length, paint, layoutWidth
+                translated, 0, translated.length, TextPaint(paint), layoutWidth
             ).setTextDirection(TextDirectionHeuristics.RTL)
                 .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
                 .setIncludePad(false)
@@ -320,7 +320,7 @@ object SmartTranslationRepair {
             while ((textLayout.lineCount > 1 || textLayout.getLineWidth(0) > layoutWidth) && paint.textSize > 7.5f * scale) {
                 paint.textSize -= 0.5f * scale
                 textLayout = StaticLayout.Builder.obtain(
-                    translated, 0, translated.length, paint, layoutWidth
+                    translated, 0, translated.length, TextPaint(paint), layoutWidth
                 ).setTextDirection(TextDirectionHeuristics.RTL)
                     .setAlignment(Layout.Alignment.ALIGN_OPPOSITE)
                     .setIncludePad(false)
