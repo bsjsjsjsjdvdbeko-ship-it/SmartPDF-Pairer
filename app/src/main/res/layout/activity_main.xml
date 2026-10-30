@@ -1,24 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="20dp">
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="SmartPDF Pairer"
             android:textSize="28sp"
             android:textStyle="bold" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="اختر PDF الأصلي وPDF العربي لإنشاء ملف ثنائي اللغة."
+            android:text="أنشئ كتابًا ثنائي اللغة: العربي يسارًا والأصلي يمينًا."
             android:textSize="16sp" />
+
         <TextView
             android:id="@+id/originalName"
             android:layout_width="match_parent"
@@ -26,11 +31,13 @@
             android:layout_marginTop="28dp"
             android:text="Original PDF: لم يتم الاختيار"
             android:textSize="16sp" />
+
         <Button
             android:id="@+id/selectOriginal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="اختيار Original PDF" />
+
         <TextView
             android:id="@+id/arabicName"
             android:layout_width="match_parent"
@@ -38,11 +45,13 @@
             android:layout_marginTop="20dp"
             android:text="Arabic PDF: لم يتم الاختيار"
             android:textSize="16sp" />
+
         <Button
             android:id="@+id/selectArabic"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="اختيار Arabic PDF" />
+
         <TextView
             android:id="@+id/pageInfo"
             android:layout_width="match_parent"
@@ -50,41 +59,65 @@
             android:layout_marginTop="20dp"
             android:text="اختر الملفين أولاً."
             android:textSize="15sp" />
+
         <RadioGroup
             android:id="@+id/layoutGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp">
+
             <RadioButton
                 android:id="@+id/arabicLeft"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:checked="true"
                 android:text="العربي يسار ← الأصلي يمين" />
+
             <RadioButton
                 android:id="@+id/originalLeft"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="الأصلي يسار ← العربي يمين" />
         </RadioGroup>
+
         <Button
             android:id="@+id/pairButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="إنشاء Bilingual_Final.pdf" />
+            android:text="إنشاء وحفظ PDF" />
+
         <ProgressBar
             android:id="@+id/progress"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
             android:layout_marginTop="16dp"
+            android:max="100"
+            android:progress="0"
             android:visibility="gone" />
+
         <TextView
             android:id="@+id/status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:enabled="false"
+            android:text="حفظ / تصدير PDF" />
+
+        <Button
+            android:id="@+id/openButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:enabled="false"
+            android:text="فتح PDF الناتج" />
+
     </LinearLayout>
 </ScrollView>

@@ -11,13 +11,27 @@ android {
         applicationId = "com.smartpdf.pairer"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
+        versionName = "1.1.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/keystore/release.keystore"
+            storeFile = file(ksPath)
+            storePassword = System.getenv("KEYSTORE_STORE_PASSWORD") ?: "dummy_pass"
+            keyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "smartpdf"
+            keyPassword = System.getenv("KEYSTORE_KEY_PASSWORD") ?: "dummy_pass"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
