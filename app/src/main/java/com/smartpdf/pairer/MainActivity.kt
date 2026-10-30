@@ -1,12 +1,16 @@
 package com.smartpdf.pairer
 
 import android.app.Activity
+import androidx.appcompat.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.TextView
@@ -18,6 +22,7 @@ import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import com.smartpdf.pairer.ocr.OcrReportGenerator
 import com.smartpdf.pairer.smart.SmartTranslationRepair
+import com.smartpdf.pairer.smart.AiAuditClient
 
 class MainActivity : AppCompatActivity() {
 
@@ -84,8 +89,52 @@ class MainActivity : AppCompatActivity() {
         saveButton.setOnClickListener { launchSavePicker() }
         openButton.setOnClickListener { openGeneratedPdf() }
         ocrButton.setOnClickListener { startOcrReport() }
+        findViewById<Button>(R.id.aiSettingsButton).setOnClickListener { showAiAuditSettings() }
 
         updateActionButtons()
+    }
+
+    private fun showAiAuditSettings() {
+        val current = AiAuditClient.loadSettings(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        fun field(hint: String, value: String, inputType: Int = android.text.InputType.TYPE_CLASS_TEXT): EditText {
+            return EditText(this).apply {
+                this.hint = hint
+                setText(value)
+                this.inputType = inputType
+                isSingleLine = true
+                content.addView(this, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        val endpoint = field("عنوان API الأساسي، مثال https://openrouter.ai/api/v1", current.baseUrl)
+        val model = field("اسم النموذج", current.model)
+        val key = field("مفتاح API (اتركه فارغاً للإبقاء على المفتاح المحفوظ)", "",
+            android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        val scroll = ScrollView(this).apply { addView(content) }
+        AlertDialog.Builder(this)
+            .setTitle("إعدادات مراجعة AI")
+            .setMessage("يدعم أي مزود يقدم واجهة متوافقة مع OpenAI Chat Completions. لا يوجد مفتاح مضمّن في التطبيق؛ يُحفظ المفتاح مشفراً باستخدام Android Keystore.")
+            .setView(scroll)
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ الإعدادات", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        try {
+                            AiAuditClient.saveSettings(this, endpoint.text.toString(), model.text.toString(), key.text.toString())
+                            Toast.makeText(this, "تم حفظ إعدادات AI بأمان.", Toast.LENGTH_SHORT).show()
+                            dialog.dismiss()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, e.message ?: "تعذر حفظ الإعدادات", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                dialog.show()
+            }
     }
 
     private fun openComparisonPreview() {

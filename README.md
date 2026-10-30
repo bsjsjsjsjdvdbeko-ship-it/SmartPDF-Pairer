@@ -64,6 +64,14 @@ Validation in this package is static (source and archive checks). A Gradle build
 The preview is a visual comparison only; it does not perform OCR alignment or detect semantic differences. Build verification must be completed by GitHub Actions.
 
 
+## V1.5.1 — Conservative Arabic coverage/quality audit
+
+- Adds a per-page reference check for up to 4 extractable English source blocks, pairing each with the nearest Arabic block by vertical position.
+- Uses MyMemory output only as a rough reference and normalizes Arabic diacritics and common Alef/Ya/Ta-Marbuta variants before measuring token coverage.
+- Automatic replacement is restricted to obvious short/incomplete target fragments (less than 35% of reference token count and less than 12% token coverage), with a verified light background and safe geometry. Low lexical overlap alone never triggers replacement.
+- If the layout/background is unsafe, the region is reported for human review. This is a conservative coverage heuristic, not an LLM semantic-quality verdict; fully omitted paragraphs are still not auto-inserted at guessed positions.
+- The advanced audit now runs even when no residual English text was detected on the target page.
+
 ## V1.5.0 — Two-mode merge and expanded page audit
 
 - Keeps the normal merge as an independent path: it calls `PdfPairer` only and does not run OCR or translation.
@@ -72,6 +80,17 @@ The preview is a visual comparison only; it does not perform OCR alignment or de
 - Detects separately positioned Latin fragments inside mixed Arabic/English PDF text runs, instead of skipping the entire mixed line. The replacement is limited to the fragment's measured bounds and remains subject to the existing white-background and fit checks.
 - Adds per-page source-English/target-Arabic extraction counts and conservative coverage warnings to the report. These counts are heuristic indicators only; they do not prove semantic translation quality or prove that a fully omitted paragraph has been restored.
 - Images containing English text can be OCR-scanned and their detected text can be translated when hOCR coordinates and safe replacement geometry are available. This does not yet reconstruct arbitrary complex image artwork or guarantee matching an image absent from the source page.
-- Arabic translation quality scoring and semantic paragraph alignment are not claimed as implemented: they require a semantic-capable translation/review provider and layout-aware matching. Uncertain content is reported rather than overwritten.
+- Full semantic quality scoring and reliable paragraph alignment are not claimed as implemented: the V1.5.1 reference-coverage check is deliberately conservative and cannot judge meaning, style, or factual accuracy. Uncertain content is reported rather than overwritten.
 
 Build/device verification is still required. This archive update does not claim a successful Gradle build or physical-device test.
+
+
+## V1.5.2 — Optional AI semantic audit and missing-paragraph flags
+
+- Adds an optional OpenAI-compatible Chat Completions endpoint/model configuration for semantic English-to-Arabic review. The app contains no embedded API key; the user's key is encrypted with Android Keystore (AES-GCM) and only HTTPS endpoints are accepted.
+- During advanced merge, up to four source text blocks per page are compared with nearby Arabic blocks. When AI is configured, the model judges meaning, omissions and material mistranslations; an AI correction is applied only at confidence >=85% and only when the existing safe-background/geometry checks pass. Otherwise the case is reported for human review.
+- If no Arabic block is found near a source block, the report flags a potentially fully omitted paragraph. It is not inserted automatically because page reflow and layout differences make guessed coordinates unsafe.
+- Without AI settings, the existing conservative MyMemory reference-coverage heuristic remains as a fallback and is explicitly identified as heuristic.
+- AI calls require the user's own compatible API endpoint, model and key, plus internet access. No key or paid service is bundled.
+
+Build/device verification remains pending; this source update has not been represented as a successful APK build or device test.

@@ -75,8 +75,8 @@ object SmartTranslationRepair {
         val report = StringBuilder()
         report.append("SmartPDF Pairer — تقرير الدمج الذكي وتحسين الترجمة\n")
         report.append("الملف الأصلي: ${sourcePdf.name}\nملف الترجمة: ${translationPdf.name}\n")
-        report.append("السياسة: ترجمة النص الإنجليزي المتبقي فقط؛ الحفاظ على العربية؛ الإدراج في موضع النص؛ عدم تعديل الملفات المصدرية.\n")
-        report.append("ملاحظة: لا يمكن إثبات غياب فقرة بالكامل من ملف الترجمة بمجرد البحث عن الإنجليزية؛ يوضح التقرير حالات النص المتبقي التي أمكن رصدها.\n")
+        report.append("السياسة: ترجمة النص الإنجليزي المتبقي، وفحص اكتمال كتل عربية قابلة للمطابقة بمقارنة مرجعية احترازية؛ لا تُستبدل العربية إلا عند ظهور نقص واضح جداً ووجود موضع وخلفية آمنين.\n")
+        report.append(if (AiAuditClient.isConfigured(context)) "مراجعة المعنى مفعّلة عبر نموذج AI متوافق مع OpenAI API؛ لا يتم الاستبدال إلا عند ثقة 85% أو أعلى وخلفية آمنة.\n" else "ملاحظة: لا توجد إعدادات AI. يستخدم التطبيق فحص تغطية مرجعي احترازياً، وليس حكماً دلالياً كاملاً. الفقرات الغائبة بالكامل تُعلّم للمراجعة ولا تُنشأ في موضع تخميني.\n")
         report.append("=".repeat(64)).append('\n')
 
         try {
@@ -147,22 +147,109 @@ object SmartTranslationRepair {
                         }
                         val candidates = if (targetPageHasCorruptText) imageCandidates else nativeCandidates + imageCandidates
 
-                        if (candidates.isEmpty()) {
-                            report.append("الصفحة ${pageIndex + 1}: لم يُكتشف نص إنجليزي متبقٍ قابل للاستبدال")
-                            if (sourceEnglishCount > 0) report.append(" (الأصل يحتوي $sourceEnglishCount سطرًا إنجليزيًا قابلًا للاستخراج)")
-                            report.append(".\n")
-                            onProgress(pageIndex + 1, total, "فحص الصفحة ${pageIndex + 1} من $total")
-                            ocrBitmap?.recycle()
-                            tesseract?.clear()
-                            continue
+                        if (candidates.isNotEmpty()) {
+                            report.append("\nالصفحة ${pageIndex + 1}: اكتشاف ${candidates.size} منطقة إنجليزية متبقية.\n")
                         }
-
-                        report.append("\nالصفحة ${pageIndex + 1}: اكتشاف ${candidates.size} منطقة إنجليزية متبقية.\n")
                         // Render a visual sample even for text-only pages: vector backgrounds
                         // can also be non-white and must not be painted over blindly.
                         val backgroundBitmap = ocrBitmap ?: try {
                             targetRenderer.renderImageWithDPI(pageIndex, 144f)
                         } catch (_: Exception) { null }
+
+                        // Semantic quality audit: translate a small set of source English
+                        // blocks as independent references, then compare them with the
+                        // nearest Arabic block on the same page. Only very-low-overlap cases
+                        // are candidates for repair; uncertain geometry/background is always
+                        // reported rather than overwritten.
+                        val sourceSemanticCandidates = sourceLines
+                            .filter { isEnglishOnly(it.text) && it.text.length >= 18 }
+                            .take(4)
+                        val targetArabicCandidates = targetLines
+                            .filter { arabic.containsMatchIn(it.text) && it.text.length >= 12 }
+                        val semanticRepaired = HashSet<String>()
+                        for (sourceRegion in sourceSemanticCandidates) {
+                            val targetRegion = targetArabicCandidates.minByOrNull {
+                                kotlin.math.abs(it.baselineFromTop - sourceRegion.baselineFromTop)
+                            }
+                            if (targetRegion == null || kotlin.math.abs(targetRegion.baselineFromTop - sourceRegion.baselineFromTop) > pageHeight * 0.075f) {
+                                // A fully omitted paragraph has no target region to overwrite. Report
+                                // it as a candidate, never guess coordinates or paint over artwork.
+                                reviewCount++
+                                report.append("[فقرة محتمل أنها مفقودة بالكامل] لم يُعثر على كتلة عربية قريبة مكانياً من النص الأصلي؛ يلزم مطابقة بصرية قبل الإدراج.\nEN: ${sourceRegion.text}\n")
+                                continue
+                            }
+                            val targetKey = normalize(targetRegion.text)
+                            if (targetKey in semanticRepaired) continue
+                            val sourceKey = normalize(sourceRegion.text)
+
+                            // When configured, use the user's OpenAI-compatible model to judge
+                            // meaning and omissions. Without credentials, retain the conservative
+                            // reference-coverage fallback and clearly disclose that it is heuristic.
+                            val aiAudit = if (AiAuditClient.isConfigured(context)) {
+                                try {
+                                    AiAuditClient.audit(context, sourceRegion.text, targetRegion.text)
+                                } catch (e: Exception) {
+                                    report.append("[تعذر تدقيق AI] ${e.message}\n")
+                                    null
+                                }
+                            } else null
+                            if (aiAudit != null) {
+                                report.append("[تدقيق دلالي AI] الحالة=${aiAudit.status}، الثقة=${(aiAudit.confidence * 100).toInt()}%: ${aiAudit.explanation}\n")
+                                if (aiAudit.status == "good") continue
+                                if (aiAudit.confidence >= 0.85 && aiAudit.correctedArabic.isNotBlank()) {
+                                    val safeBox = backgroundBitmap?.let { pointsToBitmapBox(targetRegion, pageWidth, pageHeight, it) }
+                                    val safeBackground = backgroundBitmap != null && safeBox != null && isWhiteBackground(backgroundBitmap, safeBox)
+                                    if (safeBackground && drawReplacement(translatedDoc, pageIndex, targetRegion,
+                                            aiAudit.correctedArabic, pageWidth, pageHeight)) {
+                                        translatedCount++
+                                        semanticRepaired.add(targetKey)
+                                        report.append("[تم إصلاح الترجمة بتوصية AI عالية الثقة]\nEN: ${sourceRegion.text}\nAR: ${aiAudit.correctedArabic}\n")
+                                    } else {
+                                        reviewCount++
+                                        report.append("[مراجعة بشرية] AI وجد نقصاً/خطأ، لكن موضع الاستبدال أو الخلفية غير آمنين.\nEN: ${sourceRegion.text}\nAR: ${targetRegion.text}\n")
+                                    }
+                                } else {
+                                    reviewCount++
+                                    report.append("[مراجعة بشرية] AI وجد احتمال نقص/خطأ لكن الثقة أقل من 85% أو لم يقدم صياغة كاملة؛ لم يتم الاستبدال.\n")
+                                }
+                                continue
+                            }
+
+                            val referenceArabic = if (translationCache.containsKey(sourceKey)) {
+                                translationCache[sourceKey]
+                            } else {
+                                translate(sourceRegion.text).also { translationCache[sourceKey] = it }
+                            }
+                            if (referenceArabic.isNullOrBlank()) continue
+                            val similarity = arabicCoverage(referenceArabic, targetRegion.text)
+                            val referenceTokenCount = arabicTokenCount(referenceArabic)
+                            val targetTokenCount = arabicTokenCount(targetRegion.text)
+                            // Automatic replacement is deliberately limited to obvious
+                            // omissions: a tiny target fragment plus almost no reference
+                            // vocabulary coverage. Low lexical overlap alone is not proof
+                            // of a bad translation and must never trigger destructive edits.
+                            val clearlyIncomplete = referenceTokenCount >= 5 &&
+                                targetTokenCount < (referenceTokenCount * 0.35f) && similarity < 0.12f
+                            if (!clearlyIncomplete) continue
+
+                            val safeBox = backgroundBitmap?.let {
+                                pointsToBitmapBox(targetRegion, pageWidth, pageHeight, it)
+                            }
+                            val safeBackground = backgroundBitmap != null && safeBox != null &&
+                                isWhiteBackground(backgroundBitmap, safeBox)
+                            if (safeBackground && drawReplacement(
+                                    translatedDoc, pageIndex, targetRegion, referenceArabic,
+                                    pageWidth, pageHeight
+                                )) {
+                                translatedCount++
+                                semanticRepaired.add(targetKey)
+                                report.append("[إصلاح جودة محتمل] تشابه منخفض جداً مع ترجمة مرجعية (${(similarity * 100).toInt()}%)؛ استُبدلت المنطقة العربية المقابلة بحذر.\n")
+                                report.append("EN: ${sourceRegion.text}\nAR: $referenceArabic\n")
+                            } else {
+                                reviewCount++
+                                report.append("[مراجعة جودة] ترجمة عربية محتملة الضعف (تغطية مرجعية ${(similarity * 100).toInt()}%)، لكن لم يتم استبدالها لأن موضعها/خلفيتها غير آمنين أو لا تتسع للمحتوى.\nEN: ${sourceRegion.text}\nAR: ${targetRegion.text}\n")
+                            }
+                        }
 
                         for (region in candidates) {
                             val rawText = region.text.trim()
@@ -228,6 +315,9 @@ object SmartTranslationRepair {
                                 reviewCount++
                                 report.append("[مراجعة] الترجمة أطول من المساحة الآمنة أو تعذر رسمها؛ لم تُخفَ المنطقة الأصلية: $rawText\nAR: $translated\n")
                             }
+                        }
+                        if (candidates.isEmpty()) {
+                            report.append("الصفحة ${pageIndex + 1}: لم يُكتشف نص إنجليزي متبقٍ قابل للاستبدال. اكتمل تدقيق جودة المناطق القابلة للمطابقة.\n")
                         }
                         onProgress(pageIndex + 1, total, "معالجة الصفحة ${pageIndex + 1} من $total")
                         if (backgroundBitmap !== ocrBitmap) backgroundBitmap?.recycle()
@@ -335,6 +425,26 @@ object SmartTranslationRepair {
     }
 
     private fun normalize(value: String): String = value.lowercase().replace(Regex("[^a-z0-9]+"), "").trim()
+
+    /** Fraction of meaningful reference Arabic tokens represented in the target block.
+     * Diacritics and common Alef variants are normalized to reduce false negatives.
+     */
+    private fun arabicTokens(value: String): Set<String> = value
+        .replace(Regex("[\u064B-\u065F\u0670]"), "")
+        .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+        .replace('ى', 'ي').replace('ة', 'ه')
+        .split(Regex("[^\u0621-\u064A]+"))
+        .filter { it.length >= 2 }
+        .toSet()
+
+    private fun arabicTokenCount(value: String): Int = arabicTokens(value).size
+
+    private fun arabicCoverage(reference: String, target: String): Float {
+        val expected = arabicTokens(reference)
+        val actual = arabicTokens(target)
+        if (expected.isEmpty()) return 1f
+        return expected.count { it in actual }.toFloat() / expected.size.toFloat()
+    }
 
     private fun isEnglishOnly(value: String): Boolean {
         val clean = value.trim()
