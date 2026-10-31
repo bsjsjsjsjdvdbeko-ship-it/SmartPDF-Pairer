@@ -33,6 +33,8 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         const val EXTRA_CANDIDATE_LABELS = "candidate_labels"
         const val EXTRA_CANDIDATE_PAGES = "candidate_pages"
         const val EXTRA_APPROVED_REGION_IDS = "approved_region_ids"
+        const val EXTRA_DAMAGED_PAGES = "damaged_pages"
+        const val EXTRA_REPLACE_PAGES = "replace_damaged_pages"
     }
 
     private lateinit var originalImage: ImageView
@@ -45,6 +47,8 @@ class PdfComparePreviewActivity : AppCompatActivity() {
     private val candidateLabels = arrayListOf<String>()
     private val candidatePages = arrayListOf<Int>()
     private val approvedRegionIds = linkedSetOf<String>()
+    private val damagedPages = linkedSetOf<Int>()
+    private val replaceDamagedPages = linkedSetOf<Int>()
     private lateinit var regionChoiceContainer: LinearLayout
     private val worker = Executors.newSingleThreadExecutor()
     private var originalRenderer: PdfRenderer? = null
@@ -70,13 +74,15 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         intent.getStringArrayListExtra(EXTRA_CANDIDATE_LABELS)?.let { candidateLabels.addAll(it) }
         intent.getIntegerArrayListExtra(EXTRA_CANDIDATE_PAGES)?.let { candidatePages.addAll(it) }
         approvedRegionIds.addAll(candidateIds)
+        intent.getIntegerArrayListExtra(EXTRA_DAMAGED_PAGES)?.let { damagedPages.addAll(it) }
         val reviewMode = intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)
         val reviewActions = findViewById<View>(R.id.reviewActions)
         reviewActions.visibility = if (reviewMode) View.VISIBLE else View.GONE
         if (reviewMode) {
             findViewById<Button>(R.id.acceptChanges).setOnClickListener {
                 setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCEPTED, true)
-                    .putStringArrayListExtra(EXTRA_APPROVED_REGION_IDS, ArrayList(approvedRegionIds)))
+                    .putStringArrayListExtra(EXTRA_APPROVED_REGION_IDS, ArrayList(approvedRegionIds))
+                    .putIntegerArrayListExtra(EXTRA_REPLACE_PAGES, ArrayList(replaceDamagedPages)))
                 finish()
             }
             findViewById<Button>(R.id.rejectChanges).setOnClickListener {
@@ -146,6 +152,16 @@ class PdfComparePreviewActivity : AppCompatActivity() {
         pageIndex = index
         regionChoiceContainer.removeAllViews()
         if (intent.getBooleanExtra(EXTRA_REVIEW_MODE, false)) {
+            if (pageIndex in damagedPages) {
+                val replace = CheckBox(this).apply {
+                    text = "استبدال هذه الصفحة بالصفحة الأصلية (ستبقى الإنجليزية كما هي)"
+                    isChecked = pageIndex in replaceDamagedPages
+                    setOnCheckedChangeListener { _, checked ->
+                        if (checked) replaceDamagedPages.add(pageIndex) else replaceDamagedPages.remove(pageIndex)
+                    }
+                }
+                regionChoiceContainer.addView(replace)
+            }
             val pageCandidateIndices = candidatePages.indices.filter { candidatePages[it] == pageIndex }
             if (pageCandidateIndices.isEmpty()) {
                 val empty = TextView(this).apply { text = "لا توجد مناطق إصلاح آمنة قابلة للاعتماد في هذه الصفحة."; setPadding(8, 8, 8, 8) }

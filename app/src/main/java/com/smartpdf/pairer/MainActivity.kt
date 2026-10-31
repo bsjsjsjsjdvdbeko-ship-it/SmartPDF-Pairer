@@ -25,6 +25,8 @@ import java.util.concurrent.Executors
 import com.smartpdf.pairer.ocr.OcrReportGenerator
 import com.smartpdf.pairer.smart.SmartTranslationRepair
 import com.smartpdf.pairer.smart.AiAuditClient
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 
 class MainActivity : AppCompatActivity() {
 
@@ -234,9 +236,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (requestCode == REVIEW_SMART_RESULT) {
-            val approvedRegionIds = data?.getStringArrayListExtra(PdfComparePreviewActivity.EXTRA_APPROVED_REGION_IDS)
-                ?.toSet() ?: emptySet()
-            continueSmartPairing(approvedRegionIds)
+            val approvedRegionIds = data?.getStringArrayListExtra(PdfComparePreviewActivity.EXTRA_APPROVED_REGION_IDS)?.toSet() ?: emptySet()
+            val replacePages = data?.getIntegerArrayListExtra(PdfComparePreviewActivity.EXTRA_REPLACE_PAGES)?.toSet() ?: emptySet()
+            continueSmartPairing(approvedRegionIds, replacePages)
             return
         }
         val uri = data?.data ?: return
@@ -431,12 +433,13 @@ class MainActivity : AppCompatActivity() {
                 pendingSmartOriginalFile = originalTemp
                 pendingSmartArabicOriginalFile = arabicTemp
                 pendingSmartPlaceArabicLeft = placeArabicOnLeft
+                val damagedPages = findDamagedArabicPages(originalTemp, arabicTemp)
                 runOnUiThread {
                     setBusy(false)
                     progress.progress = 100
                     status.text = "اكتمل الفحص والإصلاح الأولي: ${repairResult.translatedRegions} منطقة عولجت، و${repairResult.reviewRegions} منطقة تحتاج مراجعة.\nراجع الصفحات قبل اعتماد أي تعديل."
                     updateActionButtons()
-                    openSmartReviewPreview(arabicTemp, repairedArabic, repairResult.regionCandidates)
+                    openSmartReviewPreview(arabicTemp, repairedArabic, repairResult.regionCandidates, damagedPages)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -449,7 +452,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openSmartReviewPreview(originalArabicFile: File, repairedArabicFile: File,
-                                       candidates: List<SmartTranslationRepair.RegionCandidate>) {
+                                       candidates: List<SmartTranslationRepair.RegionCandidate>, damagedPages: List<Int>) {
         val before = FileProvider.getUriForFile(this, "$packageName.fileprovider", originalArabicFile)
         val after = FileProvider.getUriForFile(this, "$packageName.fileprovider", repairedArabicFile)
         startActivityForResult(Intent(this, PdfComparePreviewActivity::class.java).apply {
@@ -458,6 +461,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(PdfComparePreviewActivity.EXTRA_ORIGINAL_NAME, "الترجمة قبل التحسين")
             putExtra(PdfComparePreviewActivity.EXTRA_ARABIC_NAME, "الترجمة بعد التحسين")
             putExtra(PdfComparePreviewActivity.EXTRA_REVIEW_MODE, true)
+            putIntegerArrayListExtra(PdfComparePreviewActivity.EXTRA_DAMAGED_PAGES, ArrayList(damagedPages))
             putStringArrayListExtra(PdfComparePreviewActivity.EXTRA_CANDIDATE_IDS, ArrayList(candidates.map { it.id }))
             putStringArrayListExtra(PdfComparePreviewActivity.EXTRA_CANDIDATE_LABELS, ArrayList(candidates.map {
                 "EN: ${it.sourceText.take(100)}\nAR: ${it.proposedText.take(140)}\nثقة الكشف: ${it.confidence}%"
@@ -467,8 +471,34 @@ class MainActivity : AppCompatActivity() {
         }, REVIEW_SMART_RESULT)
     }
 
+    /** Conservative page-level Arabic extraction audit; detected pages are offered for explicit replacement. */
+    private fun findDamagedArabicPages(originalFile: File, arabicFile: File): List<Int> {
+        val damaged = ArrayList<Int>()
+        val arabicPattern = Regex("[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF]")
+        val badGlyphs = Regex("[\\uFFFD\\uE000-\\uF8FF]")
+        val suspiciousWord = Regex("(?:ة\\w{2,}|ى\\w{2,})")
+        PDDocument.load(originalFile).use { source ->
+            PDDocument.load(arabicFile).use { translated ->
+                if (source.numberOfPages != translated.numberOfPages) return emptyList()
+                val stripper = PDFTextStripper()
+                for (page in 1..translated.numberOfPages) {
+                    stripper.startPage = page; stripper.endPage = page
+                    val sourceText = stripper.getText(source)
+                    val translatedText = stripper.getText(translated)
+                    val sourceHasContent = sourceText.any { it.isLetterOrDigit() }
+                    val arabicCount = arabicPattern.findAll(translatedText).count()
+                    val tokenCount = translatedText.split(Regex("\\s+")).count { arabicPattern.containsMatchIn(it) }
+                    val bad = badGlyphs.containsMatchIn(translatedText)
+                    val suspicious = suspiciousWord.findAll(translatedText).count() >= 3
+                    if (sourceHasContent && (arabicCount == 0 || (tokenCount >= 3 && bad) || suspicious)) damaged += page - 1
+                }
+            }
+        }
+        return damaged
+    }
+
     /** Re-run repair from the untouched Arabic source, applying only individually approved regions. */
-    private fun continueSmartPairing(approvedRegionIds: Set<String>) {
+    private fun continueSmartPairing(approvedRegionIds: Set<String>, replaceDamagedPages: Set<Int>) {
         val originalFile = pendingSmartOriginalFile
         val originalArabic = pendingSmartArabicOriginalFile
         if (originalFile == null || originalArabic == null) {
@@ -489,7 +519,9 @@ class MainActivity : AppCompatActivity() {
                     updateProgress(60 + if (total == 0) 0 else completed * 25 / total, 100,
                         "فحص النصوص وتطبيق الإصلاحات المعتمدة: $completed من $total — $message")
                 }
-                PdfPairer.build(originalFile, selectedArabic, outputTemp, pendingSmartPlaceArabicLeft) { completed, total ->
+                val arabicAfterPageReplacement = File(cacheDir, "smart_arabic_with_page_replacements.pdf")
+                PdfPairer.replacePagesFromOriginal(originalFile, selectedArabic, arabicAfterPageReplacement, replaceDamagedPages)
+                PdfPairer.build(originalFile, arabicAfterPageReplacement, outputTemp, pendingSmartPlaceArabicLeft) { completed, total ->
                     updateProgress(85 + if (total == 0) 0 else completed * 13 / total, 100, "إنشاء الملف النهائي: $completed من $total")
                 }
                 require(outputTemp.isFile && outputTemp.length() > 0L) { "لم يتم إنشاء ملف الدمج النهائي." }

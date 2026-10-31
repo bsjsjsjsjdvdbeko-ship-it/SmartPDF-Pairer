@@ -77,6 +77,32 @@ object PdfPairer {
         require(pageCount(outputFile) == pageCount(originalArabicFile)) { "فشل التحقق من عدد صفحات النسخة المختارة." }
     }
 
+
+    /** Replace selected Arabic pages with the corresponding untouched source pages. */
+    fun replacePagesFromOriginal(sourceFile: File, arabicFile: File, outputFile: File, pageIndexes: Set<Int>) {
+        if (pageIndexes.isEmpty()) {
+            arabicFile.copyTo(outputFile, overwrite = true)
+            return
+        }
+        PDDocument.load(sourceFile).use { source ->
+            PDDocument.load(arabicFile).use { arabic ->
+                require(source.numberOfPages == arabic.numberOfPages) { "عدد صفحات الملفين غير متساوٍ؛ أُلغي استبدال الصفحات." }
+                require(pageIndexes.all { it in 0 until source.numberOfPages }) { "رقم صفحة الاستبدال غير صالح." }
+                PDDocument().use { output ->
+                    for (index in 0 until source.numberOfPages) {
+                        val page = if (index in pageIndexes) source.getPage(index) else arabic.getPage(index)
+                        output.importPage(page)
+                    }
+                    outputFile.parentFile?.mkdirs()
+                    output.save(outputFile)
+                }
+            }
+        }
+        require(outputFile.isFile && outputFile.length() > 0L && pageCount(outputFile) == pageCount(arabicFile)) {
+            "فشل التحقق من ملف الصفحات بعد الاستبدال."
+        }
+    }
+
     fun build(originalBytes: ByteArray, arabicBytes: ByteArray, arabicLeft: Boolean): ByteArray {
         PDDocument.load(ByteArrayInputStream(originalBytes)).use { original ->
             PDDocument.load(ByteArrayInputStream(arabicBytes)).use { arabic ->

@@ -163,3 +163,7 @@ The home screen now follows the approved Arabic visual reference: blue brand hea
 ## V2.3.2
 
 واجهة رئيسية أنظف بعلامات PDF أقل، ورسم موحد للملفين، ومعالجة هوامش أشرطة النظام لمنع تغطية تذييل Mohammed.
+
+
+## V2.4.0
+Arabic damaged-page review and opt-in replacement from the corresponding original English page; original English source remains unchanged. See `STAGE_V2.4.0_AR.md`.
