@@ -167,3 +167,12 @@ The home screen now follows the approved Arabic visual reference: blue brand hea
 
 ## V2.4.0
 Arabic damaged-page review and opt-in replacement from the corresponding original English page; original English source remains unchanged. See `STAGE_V2.4.0_AR.md`.
+
+
+## V2.5.0 — Manual page replacement
+
+- Normal Merge now offers a multi-select page list after both PDFs are selected and their page counts match.
+- Selected page positions are imported from the original EN PDF into the temporary AR-side document with `PDDocument.importPage`; unselected positions remain from AR.
+- This manual path performs no OCR, AI, or network requests. Smart Merge and the damaged-page review workflow remain separate and unchanged.
+- GitHub Actions workflow and release signing configuration are preserved. `versionName` is `2.5.0`.
+- Build and device runtime testing are not claimed; use GitHub Actions to verify the APK.

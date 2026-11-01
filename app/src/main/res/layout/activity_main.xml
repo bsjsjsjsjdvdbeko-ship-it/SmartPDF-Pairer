@@ -70,7 +70,7 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:layout_marginStart="18dp" android:layout_marginEnd="18dp"
             android:layout_marginTop="12dp">
-            <LinearLayout android:layout_width="0dp" android:layout_height="190dp" android:layout_weight="1"
+            <LinearLayout android:layout_width="0dp" android:layout_height="220dp" android:layout_weight="1"
                 android:layout_marginEnd="6dp" android:padding="13dp" android:gravity="center"
                 android:orientation="vertical" android:background="@drawable/bg_normal_card">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🚀"
@@ -78,6 +78,9 @@
                 <Button android:id="@+id/pairButton" android:layout_width="match_parent" android:layout_height="48dp"
                     android:layout_marginTop="5dp" android:text="دمج عادي" android:textAllCaps="false"
                     android:textStyle="bold" android:textSize="17sp" android:textColor="#124A9E" android:backgroundTint="#DCEAFF" />
+                <Button android:id="@+id/manualPagesButton" android:layout_width="match_parent" android:layout_height="42dp"
+                    android:layout_marginTop="5dp" android:text="استبدال صفحات محددة" android:textAllCaps="false"
+                    android:textSize="12sp" android:textColor="#124A9E" android:backgroundTint="#FFFFFF" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:gravity="center" android:text="دمج سريع وبسيط" android:textColor="#647493" android:textSize="13sp" />
             </LinearLayout>

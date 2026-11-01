@@ -36,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
     private lateinit var pairButton: Button
+    private lateinit var manualPagesButton: Button
+    private val manualReplacePageIndexes = linkedSetOf<Int>()
     private lateinit var saveButton: Button
     private lateinit var openButton: Button
     private lateinit var arabicLeft: RadioButton
@@ -92,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         status = findViewById<TextView>(R.id.status)
         progress = findViewById<ProgressBar>(R.id.progress)
         pairButton = findViewById<Button>(R.id.pairButton)
+        manualPagesButton = findViewById<Button>(R.id.manualPagesButton)
         saveButton = findViewById<Button>(R.id.saveButton)
         openButton = findViewById<Button>(R.id.openButton)
         arabicLeft = findViewById<RadioButton>(R.id.arabicLeft)
@@ -112,6 +115,7 @@ class MainActivity : AppCompatActivity() {
             openPdfPicker(PICK_ARABIC)
         }
         pairButton.setOnClickListener { startPairing() }
+        manualPagesButton.setOnClickListener { showManualPageSelection() }
         smartButton.setOnClickListener { startSmartPairing() }
         saveButton.setOnClickListener { launchSavePicker() }
         openButton.setOnClickListener { openGeneratedPdf() }
@@ -254,6 +258,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 generatedFile = null
                 savedOutputUri = null
+                manualReplacePageIndexes.clear()
+                updateManualPagesButtonLabel()
                 if (requestCode == PICK_ORIGINAL) {
                     originalUri = uri
                     originalName.text = "الملف الأصلي: ${displayName(uri)}"
@@ -306,16 +312,56 @@ class MainActivity : AppCompatActivity() {
                         "⚠️ يختلف عدد الصفحات. يلزم حاليًا تساوي عدد الصفحات للمطابقة صفحة مقابل صفحة."
                     }
                     pairButton.isEnabled = originalPages == arabicPages && !isBusy
+                    updateManualPagesButtonLabel()
                     smartButton.isEnabled = originalPages == arabicPages && !isBusy
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "❌ تعذر فحص PDF: ${friendlyError(e)}"
                     pairButton.isEnabled = false
+                    updateManualPagesButtonLabel()
                     smartButton.isEnabled = false
                 }
             }
         }
+    }
+
+    /** Manual page replacement is a local, deterministic operation; it never invokes OCR or AI. */
+    private fun showManualPageSelection() {
+        val total = pageCountOriginal
+        if (total == null || pageCountArabic != total || total <= 0) {
+            Toast.makeText(this, "اختر الملفين وانتظر اكتمال فحص عدد الصفحات أولاً.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = Array(total) { index -> "الصفحة ${index + 1}" }
+        val checked = BooleanArray(total) { index -> index in manualReplacePageIndexes }
+        AlertDialog.Builder(this)
+            .setTitle("استبدال صفحات محددة من EN")
+            .setMessage("حدد الصفحات التي تريد أخذها من الملف الأصلي (EN) بدلاً من الترجمة (AR).")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                if (isChecked) manualReplacePageIndexes.add(which)
+                else manualReplacePageIndexes.remove(which)
+                updateManualPagesButtonLabel()
+            }
+            .setNeutralButton("مسح التحديد") { dialog, _ ->
+                manualReplacePageIndexes.clear()
+                updateManualPagesButtonLabel()
+                dialog.dismiss()
+            }
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حفظ الاختيار", null)
+            .show()
+    }
+
+    private fun updateManualPagesButtonLabel() {
+        if (!::manualPagesButton.isInitialized) return
+        manualPagesButton.text = if (manualReplacePageIndexes.isEmpty()) {
+            "استبدال صفحات محددة"
+        } else {
+            "صفحات من EN: ${manualReplacePageIndexes.size}"
+        }
+        manualPagesButton.isEnabled = !isBusy && pageCountOriginal != null &&
+            pageCountOriginal == pageCountArabic && (pageCountOriginal ?: 0) > 0
     }
 
     private fun startPairing() {
@@ -337,6 +383,8 @@ class MainActivity : AppCompatActivity() {
                 val originalTemp = File(cacheDir, "pair_original.pdf")
                 val arabicTemp = File(cacheDir, "pair_arabic.pdf")
                 val outputTemp = File(cacheDir, "Bilingual_Final.pdf")
+                val manuallySelectedArabic = File(cacheDir, "pair_arabic_manual_selection.pdf")
+                val selectedPagesSnapshot = manualReplacePageIndexes.toSet()
 
                 copyUriToFile(original, originalTemp) { copied, total ->
                     val stage = percent(copied, total)
@@ -354,9 +402,17 @@ class MainActivity : AppCompatActivity() {
                 }
                 require(originalPages > 0) { "أحد الملفين لا يحتوي على صفحات." }
 
-                PdfPairer.build(
+                // Replace only the user-selected AR pages with their matching EN pages.
+                // importPage is used by PdfPairer; no OCR, AI request, or image inspection occurs.
+                PdfPairer.replacePagesFromOriginal(
                     originalTemp,
                     arabicTemp,
+                    manuallySelectedArabic,
+                    selectedPagesSnapshot
+                )
+                PdfPairer.build(
+                    originalTemp,
+                    manuallySelectedArabic,
                     outputTemp,
                     placeArabicOnLeft
                 ) { completed, total ->
@@ -793,6 +849,7 @@ class MainActivity : AppCompatActivity() {
             (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
         smartButton.isEnabled = !isBusy && originalUri != null && arabicUri != null &&
             (pageCountOriginal == null || pageCountArabic == null || pageCountOriginal == pageCountArabic)
+        updateManualPagesButtonLabel()
     }
 
     private fun displayName(uri: Uri): String {
